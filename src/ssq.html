@@ -299,7 +299,7 @@
     <section class="hero">
       <h1>双色球个人分析台</h1>
       <p>单文件 HTML 版。数据、统计逻辑、交互脚本全部内嵌，可直接本地打开。当前版本按“个人使用”重构：保留历史档案与形态分析，同时加入号码评分与本期推荐。</p>
-      <div class="hero-note">当前推荐逻辑采用 <strong>历史形态常见度 + 结构均衡度 + 排除项过滤</strong>。本版额外加入<strong>评分带</strong>视角：综合评分不是越高越好，很多历史真实开奖号会落在中段，所以<strong>分数所在区间本身也是一个结构维度</strong>，可以和和值、跨度、AC 一样单独观察。</div>
+      <div class="hero-note">当前推荐逻辑采用 <strong>历史结构常见度 + 结构均衡度 + 异常安全度</strong>。本版额外加入<strong>评分带</strong>视角：综合评分不是越高越好，很多历史真实开奖号会落在中段，所以<strong>分数所在区间本身也是一个结构维度</strong>，可以和和值、跨度、AC 一样单独观察。</div>
       <div class="tabbar" id="topTabs"></div>
     </section>
 
@@ -311,6 +311,7 @@
   </div>
 
   <script id="app-code" type="text/plain">
+
 const summary = DATA.summary;
     const draws = DATA.drawsDesc;
     const shapeStats = DATA.shapeStats;
@@ -342,12 +343,12 @@ const summary = DATA.summary;
           excludeZoneBreak: true,
           excludeLowSum: false,
           excludeHighSum: false,
-          excludeLowAC: false,
+          excludeLowAC: true,
           excludeHighAC: false,
           excludeRedBlueSame: false,
           excludeHistoricalDuplicate: true,
           avoidLatestOverlap: true,
-          preferBalanced: false,
+          preferBalanced: true,
         }
       }
     };
@@ -422,7 +423,7 @@ const summary = DATA.summary;
     };
     const scoreAxisLabel = {
       score: '综合评分',
-      prevalence: '历史常见度',
+      prevalence: '历史结构常见度',
       balance: '结构均衡度',
     };
     function getScoreBand(axis, value) {
@@ -475,7 +476,7 @@ const summary = DATA.summary;
         const p10Span = percentile(spanSorted, .1), p50Span = percentile(spanSorted, .5), p90Span = percentile(spanSorted, .9);
         const p10Ac = percentile(acSorted, .1), p50Ac = percentile(acSorted, .5), p90Ac = percentile(acSorted, .9);
 
-        const base = inputShapes(draw.reds, draw.blue);
+        const base = inputShapes(draw.reds, draw.blue, { drawsForExact: draws.filter(d => d.issue < draw.issue) });
         const prevalenceBase = base.refs
           .filter(ref => ref.type !== 'special_shape')
           .map(ref => percentileByType[ref.type]?.[ref.id] ?? 0.5);
@@ -561,11 +562,6 @@ const summary = DATA.summary;
     function ball(n) { return String(n).padStart(2, '0'); }
     function escapeHtml(str) { return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
     function fmtPct(v) { return v === null || v === undefined ? '—' : (v * 100).toFixed(2) + '%'; }
-    function fmtScore(v) {
-      if (v === null || v === undefined || Number.isNaN(v)) return '—';
-      const n = Number(v);
-      return Math.abs(n - Math.round(n)) < 1e-9 ? String(Math.round(n)) : n.toFixed(1).replace(/\.0$/, '');
-    }
     function percentile(sortedVals, p) {
       if (!sortedVals.length) return 0;
       if (sortedVals.length === 1) return sortedVals[0];
@@ -692,7 +688,7 @@ const summary = DATA.summary;
       };
     }
 
-    function inputShapes(reds, blue) {
+    function inputShapes(reds, blue, ctx = {}) {
       reds = [...reds].sort((a,b)=>a-b);
       const refs = [];
       const add = (type, key, display) => refs.push({ id: `${type}::${key}`, type, key: String(key), display });
@@ -719,7 +715,8 @@ const summary = DATA.summary;
       const latestNeighborSet = new Set();
       latestDraw.reds.forEach(x => { if (x > 1) latestNeighborSet.add(x - 1); if (x < 33) latestNeighborSet.add(x + 1); });
       const latestNeighbors = reds.filter(x => !latestDraw.reds.includes(x) && latestNeighborSet.has(x)).length;
-      const exact = draws.find(d => d.blue === blue && d.reds.every((n, i) => n === reds[i])) || null;
+      const exactSource = Array.isArray(ctx.drawsForExact) ? ctx.drawsForExact : draws;
+      const exact = exactSource.find(d => d.blue === blue && d.reds.every((n, i) => n === reds[i])) || null;
 
       add('size_ratio', `${small}:${big}`, `大小比 ${small}:${big}`);
       add('odd_even_ratio', `${odd}:${even}`, `奇偶比 ${odd}:${even}`);
@@ -775,7 +772,7 @@ const summary = DATA.summary;
     }
 
     function candidateProfile(reds, blue, opts = state.recommend.options) {
-      const base = inputShapes(reds, blue);
+      const base = inputShapes(reds, blue, { drawsForExact: draws });
       const matchedStats = base.refs.map(ref => shapeMap[ref.id] ? { ...shapeMap[ref.id], display: ref.display } : synthStat(ref));
       const prevalenceBase = matchedStats
         .filter(s => s.type !== 'special_shape')
@@ -888,7 +885,7 @@ const summary = DATA.summary;
           <div class="helper">截止当期的基线评分</div>
           <div class="metric-grid" style="margin-top:8px">
             <div class="metric"><div class="k">综合评分</div><div class="v">${hist.score} / ${hist.grade}</div></div>
-            <div class="metric"><div class="k">历史常见度</div><div class="v">${hist.prevalence}</div></div>
+            <div class="metric"><div class="k">历史结构常见度</div><div class="v">${hist.prevalence}</div></div>
             <div class="metric"><div class="k">结构均衡度</div><div class="v">${hist.balance}</div></div>
             <div class="metric"><div class="k">统计样本</div><div class="v">截至第 ${hist.asOfDrawCount} 期</div></div>
           </div>
@@ -1102,8 +1099,8 @@ const summary = DATA.summary;
             </div>
           </div>
           <div class="bar-list">
-            <div class="bar-row"><div>综合评分</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.score}%"></div></div><div>${fmtScore(profile.score)}</div></div>
-            <div class="bar-row"><div>历史常见度</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.prevalence}%"></div></div><div>${profile.prevalence}</div></div>
+            <div class="bar-row"><div>综合评分</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.score}%"></div></div><div>${profile.score}</div></div>
+            <div class="bar-row"><div>历史结构常见度</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.prevalence}%"></div></div><div>${profile.prevalence}</div></div>
             <div class="bar-row"><div>结构均衡度</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.balance}%"></div></div><div>${profile.balance}</div></div>
             <div class="bar-row"><div>扣分后保留</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.penaltyScore}%"></div></div><div>${profile.penaltyScore}</div></div>
             <div class="pill-wrap" style="margin-top:12px">
@@ -1112,7 +1109,7 @@ const summary = DATA.summary;
               ${bandBadge('prevalence', profile.prevalence)}
               ${bandBadge('balance', profile.balance)}
             </div>
-            <div class="helper">评分逻辑：历史形态常见度、结构均衡度、排除项命中情况三部分合成。它更像“当前模型下的结构契合度”，不是预测概率。综合评分不应理解为越高越好，很多真实开奖号本来就落在中段；因此分数区间本身也是一种可观察形态。</div>
+            <div class="helper">评分逻辑：历史结构常见度、结构均衡度、异常安全度三部分合成。它更像“当前模型下的结构位置”，不是预测概率。综合评分不应理解为越高越好，很多真实开奖号本来就落在中段；因此分数区间本身也是一种可观察形态。</div>
             <div class="acc-sub" style="margin-top:8px">当前综合带解释：${escapeHtml(scoreBand.desc)}</div>
           </div>
         </div>
@@ -1139,7 +1136,7 @@ const summary = DATA.summary;
             ${labelPill(`尾数 ${profile.base.metrics.tailPattern}`)}
             ${labelPill(`对最新一期重号 ${profile.base.metrics.latestOverlap}`)}
             ${labelPill(`对最新一期邻号 ${profile.base.metrics.latestNeighbors}`)}
-            ${profile.base.metrics.exactIssue ? labelPill(`历史重复 ${profile.base.metrics.exactIssue}`, 'red') : labelPill('历史无完全重复', 'green')}
+            ${profile.base.metrics.exactIssue ? labelPill(`历史整组复现 第${profile.base.metrics.exactIssue}期`, 'red') : labelPill('历史整组复现 未出现', 'green')}
           </div>
           <div style="margin-top:12px"><div class="helper">分数带解读</div><div class="acc-sub" style="margin-top:8px">当前综合评分落在 ${bandRangeText(scoreBand)} 的“${escapeHtml(scoreBand.label)}”。这不是单纯的好坏判断，而是说这组号码在当前模型里更接近哪一类结构位置。</div></div>
           <div style="margin-top:12px"><div class="helper">本组号码的正向标签</div><div class="pill-wrap" style="margin-top:8px">${profile.reasons.map(r => labelPill(r, 'green')).join('')}</div></div>
@@ -1297,12 +1294,12 @@ const summary = DATA.summary;
         <details class="group-acc card">
           <summary>评分带档案（分数区间本身也是一种形态）</summary>
           <div class="group-body">
-            <div class="helper">这里把综合评分、历史常见度、结构均衡度都按区间做成档案。默认按历史占比从高到低排序，用来回答“历史开奖更常落在哪些分数带”。</div>
+            <div class="helper">这里把综合评分、历史结构常见度、结构均衡度都按区间做成档案。默认按历史占比从高到低排序，用来回答“历史开奖更常落在哪些分数带”。</div>
           </div>
         </details>
 
         ${renderScoreBandArchiveGroup('综合评分区间档案', 'score')}
-        ${renderScoreBandArchiveGroup('历史常见度区间档案', 'prevalence')}
+        ${renderScoreBandArchiveGroup('历史结构常见度区间档案', 'prevalence')}
         ${renderScoreBandArchiveGroup('结构均衡度区间档案', 'balance')}
 
         <details class="group-acc card">
@@ -1390,18 +1387,18 @@ const summary = DATA.summary;
               <label class="check-item"><input id="optExcludeZoneBreak" type="checkbox" ${o.excludeZoneBreak?'checked':''} /><div><div class="check-title">排除断区</div><div class="check-sub">1-11 / 12-22 / 23-33 任一区为空直接过滤。</div></div></label>
               <label class="check-item"><input id="optExcludeLowSum" type="checkbox" ${o.excludeLowSum?'checked':''} /><div><div class="check-title">排除极低和值</div><div class="check-sub">和值 ≤ 60 的组合直接过滤。</div></div></label>
               <label class="check-item"><input id="optExcludeHighSum" type="checkbox" ${o.excludeHighSum?'checked':''} /><div><div class="check-title">排除极高和值</div><div class="check-sub">和值 ≥ 140 的组合直接过滤。</div></div></label>
-              <label class="check-item"><input id="optExcludeLowAC" type="checkbox" ${o.excludeLowAC?'checked':''} /><div><div class="check-title">排除极低 AC</div><div class="check-sub">AC ≤ 2 的极端紧凑组合过滤。默认不勾选，保留给评分系统自然压低。</div></div></label>
+              <label class="check-item"><input id="optExcludeLowAC" type="checkbox" ${o.excludeLowAC?'checked':''} /><div><div class="check-title">排除极低 AC</div><div class="check-sub">AC ≤ 2 的离散度过低组合过滤。</div></div></label>
               <label class="check-item"><input id="optExcludeHighAC" type="checkbox" ${o.excludeHighAC?'checked':''} /><div><div class="check-title">排除极高 AC</div><div class="check-sub">AC ≥ 9 的极端离散组合过滤。</div></div></label>
               <label class="check-item"><input id="optExcludeRedBlueSame" type="checkbox" ${o.excludeRedBlueSame?'checked':''} /><div><div class="check-title">排除红蓝同号</div><div class="check-sub">蓝球与任一红球相同就过滤。</div></div></label>
               <label class="check-item"><input id="optExcludeHistoricalDuplicate" type="checkbox" ${o.excludeHistoricalDuplicate?'checked':''} /><div><div class="check-title">排除历史完全重复</div><div class="check-sub">历史里已开过的整组红蓝球直接过滤。</div></div></label>
               <label class="check-item"><input id="optAvoidLatestOverlap" type="checkbox" ${o.avoidLatestOverlap?'checked':''} /><div><div class="check-title">避免与最新一期高重合</div><div class="check-sub">与最新一期重合 4 个及以上红球直接过滤。</div></div></label>
-              <label class="check-item"><input id="optPreferBalanced" type="checkbox" ${o.preferBalanced?'checked':''} /><div><div class="check-title">排除低均衡结构</div><div class="check-sub">均衡度 &lt; 62 的组合直接过滤。默认不勾选，避免把过多候选先验剔除。</div></div></label>
+              <label class="check-item"><input id="optPreferBalanced" type="checkbox" ${o.preferBalanced?'checked':''} /><div><div class="check-title">优先均衡结构</div><div class="check-sub">压低大小、奇偶、三区明显失衡的组合。</div></div></label>
             </div>
             <div class="toolbar-row">
               <button class="btn" onclick="generateRecommendations()">推荐 5 组</button>
               <select class="select" style="max-width:260px" onchange="state.recommend.sort=this.value;renderTabContent()">
                 <option value="score_desc" ${state.recommend.sort==='score_desc'?'selected':''}>按综合评分</option>
-                <option value="prevalence_desc" ${state.recommend.sort==='prevalence_desc'?'selected':''}>按历史常见度</option>
+                <option value="prevalence_desc" ${state.recommend.sort==='prevalence_desc'?'selected':''}>按历史结构常见度</option>
                 <option value="balance_desc" ${state.recommend.sort==='balance_desc'?'selected':''}>按结构均衡度</option>
                 <option value="rare_first" ${state.recommend.sort==='rare_first'?'selected':''}>按相对冷门优先</option>
               </select>
@@ -1510,8 +1507,27 @@ const summary = DATA.summary;
 
 (function(){
   const AXES = ['score','prevalence','balance'];
-  const AXIS_LABEL = { score: '综合评分', prevalence: '历史常见度', balance: '结构均衡度' };
-  const BAND_WIDTH = { score: 4, prevalence: 4, balance: 4 };
+  const AXIS_LABEL = { score: '综合评分', prevalence: '历史结构常见度', balance: '结构均衡度' };
+  const BAND_WIDTH = { score: 5, prevalence: 5, balance: 5 };
+  const PREVALENCE_WEIGHTS = {
+    size_ratio: 0.9,
+    odd_even_ratio: 0.9,
+    zone_distribution: 1.1,
+    zone_break: 0.8,
+    mod012_distribution: 0.55,
+    tail_pattern: 0.85,
+    consecutive_structure: 0.95,
+    sum_bucket: 1.0,
+    span_bucket: 0.75,
+    ac_value: 1.15,
+    blue_size: 0.35,
+    blue_odd_even: 0.35,
+    blue_mod012: 0.25,
+    red_blue_min_gap: 0.45,
+    rb_parity_combo: 0.25,
+    rb_size_combo: 0.25,
+    rb_mod012_combo: 0.2,
+  };
 
   function getTypePercentileMapByCounts(perTypeCounts, historyCount) {
     const percentileByType = {};
@@ -1541,45 +1557,192 @@ const summary = DATA.summary;
     return percentileByType;
   }
 
-  function computeBalanceAndPrevalence(base, reds, blue, ctx) {
-    const prevalenceBase = base.refs
-      .filter(ref => ref.type !== 'special_shape')
-      .map(ref => ctx.percentileByType[ref.type]?.[ref.id] ?? typeFreqPercentile[ref.id] ?? 0.5);
-    const prevalence = Math.round(avg(prevalenceBase) * 100);
+  function geometricWeightedPercentile(base, percentileByType) {
+    let logSum = 0;
+    let weightSum = 0;
+    base.refs.filter(ref => ref.type !== 'special_shape').forEach(ref => {
+      const w = PREVALENCE_WEIGHTS[ref.type] ?? 0.35;
+      const raw = percentileByType?.[ref.type]?.[ref.id] ?? typeFreqPercentile[ref.id] ?? 0.5;
+      const p = clamp(raw, 0.02, 0.995);
+      logSum += w * Math.log(p);
+      weightSum += w;
+    });
+    if (!weightSum) return 50;
+    return clamp(Math.round(Math.exp(logSum / weightSum) * 100), 1, 99);
+  }
 
-    const p10Sum = percentile(ctx.sumSeries.length ? ctx.sumSeries : metricSeries.sum, .1);
-    const p50Sum = percentile(ctx.sumSeries.length ? ctx.sumSeries : metricSeries.sum, .5);
-    const p90Sum = percentile(ctx.sumSeries.length ? ctx.sumSeries : metricSeries.sum, .9);
-    const p10Span = percentile(ctx.spanSeries.length ? ctx.spanSeries : metricSeries.span, .1);
-    const p50Span = percentile(ctx.spanSeries.length ? ctx.spanSeries : metricSeries.span, .5);
-    const p90Span = percentile(ctx.spanSeries.length ? ctx.spanSeries : metricSeries.span, .9);
-    const p10Ac = percentile(ctx.acSeries.length ? ctx.acSeries : metricSeries.ac, .1);
-    const p50Ac = percentile(ctx.acSeries.length ? ctx.acSeries : metricSeries.ac, .5);
-    const p90Ac = percentile(ctx.acSeries.length ? ctx.acSeries : metricSeries.ac, .9);
+  function tailBalanceScore(label) {
+    if (label === '全不同尾') return 88;
+    if (label === '全同尾') return 6;
+    if (label.includes('1组5同尾')) return 16;
+    if (label.includes('1组4同尾')) return 28;
+    if (label.includes('1组3同尾')) return 56;
+    return 74;
+  }
 
-    const sizeScore = [20, 52, 80, 100, 80, 52, 20][base.metrics.small] || 20;
-    const oddEvenScore = [20, 52, 80, 100, 80, 52, 20][base.metrics.odd] || 20;
+  function runBalanceScore(label) {
+    if (label === '无连号') return 88;
+    if (label === '1组2连') return 82;
+    if (label === '2连+2连') return 72;
+    if (label === '1组3连') return 58;
+    if (['1组4连', '3连+2连', '4连+2连'].includes(label)) return 26;
+    if (['1组5连', '全6连号'].includes(label)) return 8;
+    return 68;
+  }
+
+  function computeBalanceValue(base, reds, blue, ctx) {
+    const sumSeries = ctx.sumSeries?.length ? ctx.sumSeries : metricSeries.sum;
+    const spanSeries = ctx.spanSeries?.length ? ctx.spanSeries : metricSeries.span;
+    const acSeries = ctx.acSeries?.length ? ctx.acSeries : metricSeries.ac;
+    const p10Sum = percentile(sumSeries, .1), p50Sum = percentile(sumSeries, .5), p90Sum = percentile(sumSeries, .9);
+    const p10Span = percentile(spanSeries, .1), p50Span = percentile(spanSeries, .5), p90Span = percentile(spanSeries, .9);
+    const p10Ac = percentile(acSeries, .1), p50Ac = percentile(acSeries, .5), p90Ac = percentile(acSeries, .9);
+
+    const sizeScore = [6, 24, 58, 88, 58, 24, 6][base.metrics.small] || 6;
+    const oddEvenScore = [6, 24, 58, 88, 58, 24, 6][base.metrics.odd] || 6;
     const zoneDiff = Math.abs(base.metrics.z1 - 2) + Math.abs(base.metrics.z2 - 2) + Math.abs(base.metrics.z3 - 2);
-    const zoneScore = clamp(100 - zoneDiff * 22, 24, 100);
-    const sumScore = valueScoreByDistance(base.metrics.sum, p10Sum, p50Sum, p90Sum);
-    const spanScore = valueScoreByDistance(base.metrics.span, p10Span, p50Span, p90Span);
-    const acScore = valueScoreByDistance(base.metrics.ac, p10Ac, p50Ac, p90Ac);
-    const tailScore = base.metrics.tailPattern === '全不同尾' ? 96 : (base.metrics.tailPattern === '全同尾' ? 8 : 72);
-    let runScore = 90;
-    if (base.metrics.runLabel === '1组2连') runScore = 80;
-    else if (base.metrics.runLabel === '2连+2连') runScore = 72;
-    else if (base.metrics.runLabel === '1组3连') runScore = 58;
-    else if (['1组4连', '1组5连', '全6连号', '3连+2连', '4连+2连'].includes(base.metrics.runLabel)) runScore = 16;
+    let zoneScore = clamp(100 - zoneDiff * 18, 4, 100);
+    if (base.metrics.z1 === 6 || base.metrics.z2 === 6 || base.metrics.z3 === 6) zoneScore = Math.min(zoneScore, 6);
+    else if (Math.max(base.metrics.z1, base.metrics.z2, base.metrics.z3) >= 5) zoneScore = Math.min(zoneScore, 18);
 
-    const maxRedCount = Math.max(1, ...(ctx.redCounts || redFreq).slice(1));
-    const maxBlueCount = Math.max(1, ...(ctx.blueCounts || blueFreq).slice(1));
-    const redCounts = ctx.redCounts || redFreq;
-    const blueCounts = ctx.blueCounts || blueFreq;
-    const numberFreqScore = clamp(Math.round(avg(reds.map(n => (redCounts[n] || 0) / maxRedCount)) * 100), 20, 100);
-    const blueFreqScore = blue !== null ? clamp(Math.round(((blueCounts[blue] || 0) / maxBlueCount) * 100), 20, 100) : 50;
+    let sumScore = valueScoreByDistance(base.metrics.sum, p10Sum, p50Sum, p90Sum);
+    let spanScore = valueScoreByDistance(base.metrics.span, p10Span, p50Span, p90Span);
+    let acScore = valueScoreByDistance(base.metrics.ac, p10Ac, p50Ac, p90Ac);
+    if (base.metrics.sum <= 60 || base.metrics.sum >= 140) sumScore = Math.min(sumScore, 10);
+    if (base.metrics.span <= 8) spanScore = Math.min(spanScore, 12);
+    else if (base.metrics.span <= 12) spanScore = Math.min(spanScore, 26);
+    if (base.metrics.ac <= 1) acScore = Math.min(acScore, 8);
+    else if (base.metrics.ac === 2) acScore = Math.min(acScore, 14);
 
-    const balance = Math.round(sizeScore*.16 + oddEvenScore*.16 + zoneScore*.2 + sumScore*.14 + spanScore*.09 + acScore*.09 + tailScore*.06 + runScore*.05 + numberFreqScore*.03 + blueFreqScore*.02);
-    return { prevalence, balance };
+    const tailScore = tailBalanceScore(base.metrics.tailPattern);
+    const runScore = runBalanceScore(base.metrics.runLabel);
+
+    let balance = clamp(Math.round(
+      zoneScore * 0.28 +
+      spanScore * 0.16 +
+      acScore * 0.16 +
+      sumScore * 0.14 +
+      runScore * 0.12 +
+      sizeScore * 0.08 +
+      oddEvenScore * 0.04 +
+      tailScore * 0.02
+    ), 1, 99);
+
+    const hardCaps = [];
+    if (base.metrics.z1 === 6 || base.metrics.z2 === 6 || base.metrics.z3 === 6) hardCaps.push(12);
+    if (base.metrics.runLabel === '全6连号') hardCaps.push(10);
+    else if (base.metrics.runLabel === '1组5连') hardCaps.push(16);
+    else if (['1组4连', '3连+2连', '4连+2连'].includes(base.metrics.runLabel)) hardCaps.push(24);
+    if (base.metrics.span <= 8) hardCaps.push(12);
+    else if (base.metrics.span <= 12) hardCaps.push(26);
+    if (base.metrics.ac <= 1) hardCaps.push(12);
+    else if (base.metrics.ac === 2) hardCaps.push(18);
+    if (base.metrics.sum <= 60 || base.metrics.sum >= 140) hardCaps.push(18);
+    if ((base.metrics.sum <= 60 || base.metrics.sum >= 140) && base.metrics.span <= 8) hardCaps.push(10);
+    if ((base.metrics.z1 === 6 || base.metrics.z2 === 6 || base.metrics.z3 === 6) && ['全6连号', '1组5连'].includes(base.metrics.runLabel)) hardCaps.push(8);
+    if (hardCaps.length) balance = Math.min(balance, ...hardCaps);
+
+    return {
+      balance,
+      parts: { sizeScore, oddEvenScore, zoneScore, sumScore, spanScore, acScore, tailScore, runScore },
+      hardCaps,
+    };
+  }
+
+  function classifyRisk(base) {
+    const hits = [];
+    const excludeHits = [];
+    let severity = 0;
+    let l1 = 0, l2 = 0, l3 = 0;
+    let hardCap = 99;
+    const add = (level, label, sev, cap = null, exclude = false) => {
+      hits.push(label);
+      severity += sev;
+      if (level === 1) l1 += 1;
+      else if (level === 2) l2 += 1;
+      else if (level === 3) l3 += 1;
+      if (cap !== null) hardCap = Math.min(hardCap, cap);
+      if (exclude) excludeHits.push(label);
+    };
+
+    if (base.metrics.exactIssue) add(3, `历史完全重复 ${base.metrics.exactIssue}`, 85, 12, true);
+    if (base.metrics.runLabel === '全6连号') add(3, '全6连号', 75, 15, true);
+    else if (base.metrics.runLabel === '1组5连') add(2, '1组5连', 34, 30, true);
+    else if (['1组4连', '3连+2连', '4连+2连'].includes(base.metrics.runLabel)) add(2, '长连号结构', 22, 40, true);
+
+    if (base.metrics.ac <= 1) add(3, `AC过低 ${base.metrics.ac}`, 70, 18, true);
+    else if (base.metrics.ac === 2) add(2, 'AC=2', 35, 35, true);
+    else if (base.metrics.ac >= 9) add(1, 'AC偏高', 8, null, false);
+
+    if (base.metrics.sum <= 60) add(2, '极低和值', 28, 40, true);
+    if (base.metrics.sum >= 140) add(2, '极高和值', 28, 40, true);
+
+    if (base.metrics.z1 === 6 || base.metrics.z2 === 6 || base.metrics.z3 === 6) add(2, '单区6枚', 30, 35, true);
+    else if (base.metrics.breakParts.length) add(1, `断区 ${base.metrics.breakParts.join('+')}`, 12, null, false);
+
+    if (base.metrics.odd === 6) add(2, '全奇', 25, 40, true);
+    if (base.metrics.even === 6) add(2, '全偶', 25, 40, true);
+
+    if (base.metrics.tailPattern === '全同尾') add(2, '全同尾', 35, 30, true);
+    else if (base.metrics.tailPattern.includes('1组5同尾')) add(2, '5同尾', 24, 40, true);
+    else if (base.metrics.tailPattern.includes('1组4同尾')) add(1, '4同尾', 15, null, false);
+
+    if (base.metrics.small === 0 || base.metrics.small === 6) add(1, '大小极端失衡', 12, null, false);
+    if (base.metrics.odd === 0 || base.metrics.odd === 6) add(1, '奇偶极端失衡', 10, null, false);
+    if (base.metrics.runLabel === '1组3连') add(1, '3连结构', 8, null, false);
+    if (base.metrics.tailPattern.includes('1组3同尾')) add(1, '3同尾', 8, null, false);
+    if (base.refs.some(r => r.type === 'red_blue_same' && r.key === '红蓝同号')) add(1, '红蓝同号', 12, null, false);
+
+    if (l3 > 0) hardCap = Math.min(hardCap, 20);
+    else if (l2 >= 2) hardCap = Math.min(hardCap, 35);
+    else if (l2 >= 1 && l1 >= 2) hardCap = Math.min(hardCap, 40);
+
+    const safety = clamp(100 - severity, 1, 100);
+    return { hits, excludeHits, severity, safety, l1, l2, l3, hardCap };
+  }
+
+  function computeUnifiedProfile(base, reds, blue, ctx) {
+    const regularRaw = geometricWeightedPercentile(base, ctx.percentileByType || {});
+    const { balance } = computeBalanceValue(base, reds, blue, ctx);
+    const risk = classifyRisk(base);
+    const prevalence = clamp(Math.round(regularRaw * (0.2 + 0.8 * risk.safety / 100)), 1, 99);
+    let score = clamp(Math.round(prevalence * 0.42 + balance * 0.33 + risk.safety * 0.25), 1, 99);
+    const rawScore = score;
+    if (risk.hardCap < 99) score = Math.min(score, risk.hardCap);
+    return {
+      prevalence,
+      prevalenceRaw: regularRaw,
+      balance,
+      safety: risk.safety,
+      rawScore,
+      score,
+      hardCap: risk.hardCap,
+      hardCapApplied: risk.hardCap < 99 && rawScore > risk.hardCap,
+      riskHits: risk.hits,
+      excludeHits: risk.excludeHits,
+      riskSeverity: risk.severity,
+      riskLevelCounts: { l1: risk.l1, l2: risk.l2, l3: risk.l3 },
+      grade: getGrade(score),
+    };
+  }
+
+  function computeFilterHits(base, reds, blue, balance, opts) {
+    const hits = [];
+    if (!opts) return hits;
+    if (opts.excludeAllOddEven && (base.metrics.odd === 6 || base.metrics.even === 6)) hits.push('按当前设置排除全奇/全偶');
+    if (opts.excludeSameTail && base.metrics.tailPattern === '全同尾') hits.push('按当前设置排除全同尾');
+    if (opts.excludeFullRun && base.metrics.runLabel === '全6连号') hits.push('按当前设置排除全6连号');
+    if (opts.excludeRareRun && ['1组5连','1组4连','3连+2连','4连+2连'].includes(base.metrics.runLabel)) hits.push('按当前设置排除长连号');
+    if (opts.excludeZoneBreak && base.metrics.breakParts.length) hits.push('按当前设置排除断区');
+    if (opts.excludeLowSum && base.metrics.sum <= 60) hits.push('按当前设置排除极低和值');
+    if (opts.excludeHighSum && base.metrics.sum >= 140) hits.push('按当前设置排除极高和值');
+    if (opts.excludeLowAC && base.metrics.ac <= 2) hits.push('按当前设置排除低AC');
+    if (opts.excludeHighAC && base.metrics.ac >= 9) hits.push('按当前设置排除高AC');
+    if (opts.excludeRedBlueSame && blue !== null && reds.includes(blue)) hits.push('按当前设置排除红蓝同号');
+    if (opts.excludeHistoricalDuplicate && base.metrics.exactIssue) hits.push('按当前设置排除历史重复');
+    if (opts.avoidLatestOverlap && base.metrics.latestOverlap >= 4) hits.push('按当前设置排除上期高重合');
+    if (opts.preferBalanced && balance < 62) hits.push('按当前设置要求更高均衡度');
+    return hits;
   }
 
   function buildHistoricalProfilesNoLeak() {
@@ -1594,23 +1757,25 @@ const summary = DATA.summary;
     for (const draw of drawsAsc) {
       const historyCount = sumSeries.length;
       const percentileByType = getTypePercentileMapByCounts(perTypeCounts, historyCount);
-      const base = inputShapes(draw.reds, draw.blue);
-      const { prevalence, balance } = historyCount === 0
-        ? { prevalence: 50, balance: 50 }
-        : computeBalanceAndPrevalence(base, draw.reds, draw.blue, {
-            percentileByType,
-            redCounts,
-            blueCounts,
-            sumSeries,
-            spanSeries,
-            acSeries,
-          });
-      const rawScore = clamp(Math.round(prevalence*.52 + balance*.40 + 8), 1, 99);
+      const base = inputShapes(draw.reds, draw.blue, { drawsForExact: drawsAsc.slice(0, historyCount) });
+      const evaluated = computeUnifiedProfile(base, draw.reds, draw.blue, {
+        percentileByType,
+        redCounts,
+        blueCounts,
+        sumSeries,
+        spanSeries,
+        acSeries,
+      });
       profiles[draw.issue] = {
-        score: rawScore,
-        prevalence,
-        balance,
-        grade: getGrade(rawScore),
+        score: evaluated.score,
+        prevalence: evaluated.prevalence,
+        balance: evaluated.balance,
+        safety: evaluated.safety,
+        rawScore: evaluated.rawScore,
+        hardCap: evaluated.hardCap,
+        hardCapApplied: evaluated.hardCapApplied,
+        riskHits: evaluated.riskHits,
+        grade: evaluated.grade,
         historyCount,
         asOfIssue: draw.issue,
         asOfDate: draw.date,
@@ -1777,110 +1942,78 @@ const summary = DATA.summary;
   }
 
   candidateProfile = function(reds, blue, opts = state.recommend.options) {
-    const base = inputShapes(reds, blue);
+    const safeReds = [...reds].sort((a,b)=>a-b);
+    const base = inputShapes(safeReds, blue, { drawsForExact: draws });
     const matchedStats = base.refs.map(ref => shapeMap[ref.id] ? { ...shapeMap[ref.id], display: ref.display } : synthStat(ref));
-    const prevalenceBase = matchedStats
-      .filter(s => s.type !== 'special_shape')
-      .map(s => typeFreqPercentile[s.id] !== undefined ? typeFreqPercentile[s.id] : 0.5);
-    const prevalence = Math.round(avg(prevalenceBase) * 100);
+    const core = computeUnifiedProfile(base, safeReds, blue, {
+      percentileByType: {},
+      redCounts: redFreq,
+      blueCounts: blueFreq,
+      sumSeries: metricSeries.sum,
+      spanSeries: metricSeries.span,
+      acSeries: metricSeries.ac,
+    });
 
-    const p10Sum = percentile(metricSeries.sum, .1), p50Sum = percentile(metricSeries.sum, .5), p90Sum = percentile(metricSeries.sum, .9);
-    const p10Span = percentile(metricSeries.span, .1), p50Span = percentile(metricSeries.span, .5), p90Span = percentile(metricSeries.span, .9);
-    const p10Ac = percentile(metricSeries.ac, .1), p50Ac = percentile(metricSeries.ac, .5), p90Ac = percentile(metricSeries.ac, .9);
-    const sizeScore = [20, 52, 80, 100, 80, 52, 20][base.metrics.small] || 20;
-    const oddEvenScore = [20, 52, 80, 100, 80, 52, 20][base.metrics.odd] || 20;
-    const zoneDiff = Math.abs(base.metrics.z1 - 2) + Math.abs(base.metrics.z2 - 2) + Math.abs(base.metrics.z3 - 2);
-    const zoneScore = clamp(100 - zoneDiff * 22, 24, 100);
-    const sumScore = valueScoreByDistance(base.metrics.sum, p10Sum, p50Sum, p90Sum);
-    const spanScore = valueScoreByDistance(base.metrics.span, p10Span, p50Span, p90Span);
-    const acScore = valueScoreByDistance(base.metrics.ac, p10Ac, p50Ac, p90Ac);
-    const tailScore = base.metrics.tailPattern === '全不同尾' ? 96 : (base.metrics.tailPattern === '全同尾' ? 8 : 72);
-    let runScore = 90;
-    if (base.metrics.runLabel === '1组2连') runScore = 80;
-    else if (base.metrics.runLabel === '2连+2连') runScore = 72;
-    else if (base.metrics.runLabel === '1组3连') runScore = 58;
-    else if (['1组4连', '1组5连', '全6连号', '3连+2连', '4连+2连'].includes(base.metrics.runLabel)) runScore = 16;
-    const numberFreqScore = clamp(Math.round(avg(reds.map(n => redFreq[n] / Math.max(...redFreq))) * 100), 20, 100);
-    const blueFreqScore = blue !== null ? clamp(Math.round((blueFreq[blue] / Math.max(...blueFreq)) * 100), 20, 100) : 50;
-    const balance = Math.round(sizeScore*.16 + oddEvenScore*.16 + zoneScore*.2 + sumScore*.14 + spanScore*.09 + acScore*.09 + tailScore*.06 + runScore*.05 + numberFreqScore*.03 + blueFreqScore*.02);
+    const scoreBand = getBandArchiveV6('score', core.score);
+    const prevalenceBand = getBandArchiveV6('prevalence', core.prevalence);
+    const balanceBand = getBandArchiveV6('balance', core.balance);
+    const bandFit = Math.round(prevalenceBand.fit * 0.40 + balanceBand.fit * 0.35 + scoreBand.fit * 0.25);
+    const recommendScore = clamp(Math.round(core.score * 0.72 + bandFit * 0.28), 1, 99);
 
-    const ruleHits = [];
-    let penalty = 0;
-    const specials = base.refs.filter(r => r.type === 'special_shape').map(r => r.key);
-    if (opts.excludeAllOddEven && (base.metrics.odd === 6 || base.metrics.even === 6)) { ruleHits.push('全奇/全偶'); penalty += 16; }
-    if (opts.excludeSameTail && base.metrics.tailPattern === '全同尾') { ruleHits.push('全同尾'); penalty += 18; }
-    if (opts.excludeFullRun && base.metrics.runLabel === '全6连号') { ruleHits.push('全6连号'); penalty += 20; }
-    if (opts.excludeRareRun && ['1组5连','1组4连','3连+2连','4连+2连'].includes(base.metrics.runLabel)) { ruleHits.push('罕见长连号'); penalty += 16; }
-    if (opts.excludeZoneBreak && base.metrics.breakParts.length) { ruleHits.push('断区形态'); penalty += 14; }
-    if (opts.excludeLowSum && base.metrics.sum <= 60) { ruleHits.push('极低和值'); penalty += 12; }
-    if (opts.excludeHighSum && base.metrics.sum >= 140) { ruleHits.push('极高和值'); penalty += 12; }
-    if (opts.excludeLowAC && base.metrics.ac <= 2) { ruleHits.push('极低AC'); penalty += 12; }
-    if (opts.excludeHighAC && base.metrics.ac >= 9) { ruleHits.push('极高AC'); penalty += 10; }
-    if (opts.excludeRedBlueSame && blue !== null && reds.includes(blue)) { ruleHits.push('红蓝同号'); penalty += 9; }
-    if (opts.excludeHistoricalDuplicate && base.metrics.exactIssue) { ruleHits.push('历史完全重复'); penalty += 22; }
-    if (opts.avoidLatestOverlap && base.metrics.latestOverlap >= 4) { ruleHits.push('与最新一期高重合'); penalty += 10; }
-    if (opts.preferBalanced && balance < 62) { ruleHits.push('均衡度不足'); penalty += 8; }
-
+    const filterHits = computeFilterHits(base, safeReds, blue, core.balance, opts);
+    const hardExcludeHits = [];
+    if (core.hardCap <= 40 || core.safety < 55) hardExcludeHits.push('触发统一安全阈值');
+    const ruleHits = [...new Set([...hardExcludeHits, ...filterHits])];
     const specialStats = matchedStats.filter(s => s.type === 'special_shape' || s.kind === 'special').sort((a,b)=>a.occurrence_count - b.occurrence_count);
-    const penaltyScore = clamp(100 - penalty, 0, 100);
-    const rawScore = clamp(prevalence*.52 + balance*.40 + penaltyScore*.08 - ruleHits.length*2, 1, 99);
-    const score = Math.round(rawScore * 10) / 10;
-    const grade = getGrade(score);
-
-    const scoreBand = getBandArchiveV6('score', rawScore);
-    const prevalenceBand = getBandArchiveV6('prevalence', prevalence);
-    const balanceBand = getBandArchiveV6('balance', balance);
-    const rawBandFit = prevalenceBand.fit * 0.45 + balanceBand.fit * 0.35 + scoreBand.fit * 0.20;
-    const bandFit = Math.round(rawBandFit * 10) / 10;
-    const rawRecommendScore = clamp(rawScore * 0.58 + rawBandFit * 0.42, 1, 99);
-    const recommendScore = Math.round(rawRecommendScore * 10) / 10;
 
     const reasons = [];
-    if (prevalenceBand.densityTier === '主密集带') reasons.push('常见度落入历史主密集带');
+    if (core.safety >= 80) reasons.push('异常安全度较高');
+    if (prevalenceBand.densityTier === '主密集带') reasons.push('结构常见度落入历史主密集带');
     if (balanceBand.densityTier === '主密集带') reasons.push('均衡度落入历史主密集带');
     if (scoreBand.densityTier === '主密集带') reasons.push('综合评分落入历史主密集带');
     if (base.metrics.z1 === 2 && base.metrics.z2 === 2 && base.metrics.z3 === 2) reasons.push('三区分布均衡');
     if (base.metrics.odd === 3 && base.metrics.small === 3) reasons.push('奇偶/大小接近中性');
-    if (!specials.length) reasons.push('未触发特殊形态');
+    if (!core.riskHits.length) reasons.push('未触发明显异常');
     if (base.metrics.latestOverlap <= 2) reasons.push('与最新一期重合较低');
-    if (!reasons.length) reasons.push('通过当前推荐排序逻辑');
+    if (!reasons.length) reasons.push('通过统一评分内核');
 
     return {
-      reds: [...reds].sort((a,b)=>a-b),
+      reds: safeReds,
       blue,
       base,
       matchedStats,
-      prevalence,
-      balance,
-      penaltyScore,
-      score,
-      grade,
+      prevalence: core.prevalence,
+      prevalenceRaw: core.prevalenceRaw,
+      balance: core.balance,
+      safety: core.safety,
+      penaltyScore: core.safety,
+      score: core.score,
+      rawScore: core.rawScore,
+      hardCap: core.hardCap,
+      hardCapApplied: core.hardCapApplied,
+      grade: core.grade,
       scoreBand,
       prevalenceBand,
       balanceBand,
-      rawScore,
       bandFit,
-      rawBandFit,
       recommendScore,
-      rawRecommendScore,
+      riskHits: core.riskHits,
+      filterHits,
       ruleHits,
       specialStats,
       reasons,
-      key: [...reds].sort((a,b)=>a-b).join('-') + '|' + blue,
+      key: safeReds.join('-') + '|' + blue,
     };
   };
 
   sortRecommendList = function(list, key) {
     const arr = [...list];
-    const rec = v => v.rawRecommendScore ?? v.recommendScore;
-    const fit = v => v.rawBandFit ?? v.bandFit;
-    const sc = v => v.rawScore ?? v.score;
-    if (key === 'recommend_desc') arr.sort((a,b)=>rec(b) - rec(a) || fit(b) - fit(a) || sc(b) - sc(a) || a.key.localeCompare(b.key,'zh-CN'));
-    else if (key === 'bandfit_desc') arr.sort((a,b)=>fit(b) - fit(a) || rec(b) - rec(a) || sc(b) - sc(a));
-    else if (key === 'score_desc') arr.sort((a,b)=>sc(b) - sc(a) || fit(b) - fit(a) || a.key.localeCompare(b.key,'zh-CN'));
-    else if (key === 'prevalence_desc') arr.sort((a,b)=>b.prevalence - a.prevalence || rec(b) - rec(a));
-    else if (key === 'balance_desc') arr.sort((a,b)=>b.balance - a.balance || rec(b) - rec(a));
-    else if (key === 'explore_sparse') arr.sort((a,b)=>fit(a) - fit(b) || sc(b) - sc(a));
+    if (key === 'recommend_desc') arr.sort((a,b)=>b.recommendScore - a.recommendScore || b.bandFit - a.bandFit || b.score - a.score || a.key.localeCompare(b.key,'zh-CN'));
+    else if (key === 'bandfit_desc') arr.sort((a,b)=>b.bandFit - a.bandFit || b.recommendScore - a.recommendScore || b.score - a.score);
+    else if (key === 'score_desc') arr.sort((a,b)=>b.score - a.score || b.bandFit - a.bandFit || a.key.localeCompare(b.key,'zh-CN'));
+    else if (key === 'prevalence_desc') arr.sort((a,b)=>b.prevalence - a.prevalence || b.recommendScore - a.recommendScore);
+    else if (key === 'balance_desc') arr.sort((a,b)=>b.balance - a.balance || b.recommendScore - a.recommendScore);
+    else if (key === 'explore_sparse') arr.sort((a,b)=>a.bandFit - b.bandFit || b.score - a.score);
     return arr;
   };
 
@@ -1894,9 +2027,15 @@ const summary = DATA.summary;
         <div class="helper">截止当期的当时评分（仅用此前历史，不含当期自身）</div>
         <div class="metric-grid" style="margin-top:8px">
           <div class="metric"><div class="k">综合评分</div><div class="v">${hist.score} / ${hist.grade}</div></div>
-          <div class="metric"><div class="k">历史常见度</div><div class="v">${hist.prevalence}</div></div>
+          <div class="metric"><div class="k">历史结构常见度</div><div class="v">${hist.prevalence}</div></div>
           <div class="metric"><div class="k">结构均衡度</div><div class="v">${hist.balance}</div></div>
+          <div class="metric"><div class="k">异常安全度</div><div class="v">${hist.safety ?? '—'}</div></div>
+        </div>
+        <div class="metric-grid" style="margin-top:10px">
           <div class="metric"><div class="k">基准样本</div><div class="v">前 ${hist.historyCount} 期</div></div>
+          <div class="metric"><div class="k">封顶前原始分</div><div class="v">${hist.rawScore ?? hist.score}</div></div>
+          <div class="metric"><div class="k">异常封顶</div><div class="v">${hist.hardCapApplied ? `≤ ${hist.hardCap}` : '未封顶'}</div></div>
+          <div class="metric"><div class="k">评分口径</div><div class="v">统一内核 / 截止当时</div></div>
         </div>
         <div class="pill-wrap" style="margin-top:10px">
           ${bandBadgeV6('score', hist.score)}
@@ -1907,7 +2046,7 @@ const summary = DATA.summary;
           ${bandBadgeV6('balance', hist.balance)}
           ${labelPill(`历史占比 ${fmtPct(balanceBand.rate)}`, 'blue')}
         </div>
-        <div class="helper" style="margin-top:8px">综合评分不是“越高越好”。关键是它当时落入哪个历史评分带，以及那个评分带在历史开奖里是否密集。</div>
+        <div class="helper" style="margin-top:8px">历史回看使用与当前完全相同的统一评分内核，只是参考窗口截断到当期之前。综合评分仍然不是“越高越好”；异常结构会先压低安全度并触发封顶，历史结构常见度只反映结构冷热。</div>
         <div class="acc-sub" style="margin-top:8px">${escapeHtml(bandExplainV6('score', scoreBand))}</div>
       </div>
     `;
@@ -2014,25 +2153,27 @@ const summary = DATA.summary;
       <div class="score-block">
         <div class="score-ring" style="--pct:${mode === 'recommend' ? profile.recommendScore : profile.score}">
           <div class="score-center">
-            <div class="score-big">${fmtScore(mode === 'recommend' ? profile.recommendScore : profile.score)}</div>
+            <div class="score-big">${mode === 'recommend' ? profile.recommendScore : profile.score}</div>
             <div class="score-grade">${mode === 'recommend' ? '推荐排序分' : `等级 ${profile.grade}`}</div>
           </div>
         </div>
         <div class="bar-list">
-          <div class="bar-row"><div>综合评分</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.score}%"></div></div><div>${fmtScore(profile.score)}</div></div>
-          <div class="bar-row"><div>历史常见度</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.prevalence}%"></div></div><div>${profile.prevalence}</div></div>
+          <div class="bar-row"><div>综合评分</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.score}%"></div></div><div>${profile.score}</div></div>
+          <div class="bar-row"><div>历史结构常见度</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.prevalence}%"></div></div><div>${profile.prevalence}</div></div>
           <div class="bar-row"><div>结构均衡度</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.balance}%"></div></div><div>${profile.balance}</div></div>
-          <div class="bar-row"><div>密集带贴合度</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.bandFit}%"></div></div><div>${fmtScore(profile.bandFit)}</div></div>
-          <div class="bar-row"><div>推荐排序分</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.recommendScore}%"></div></div><div>${fmtScore(profile.recommendScore)}</div></div>
+          <div class="bar-row"><div>异常安全度</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.safety}%"></div></div><div>${profile.safety}</div></div>
+          <div class="bar-row"><div>密集带贴合度</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.bandFit}%"></div></div><div>${profile.bandFit}</div></div>
+          <div class="bar-row"><div>推荐排序分</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.recommendScore}%"></div></div><div>${profile.recommendScore}</div></div>
+          <div class="bar-row"><div>封顶前原始分</div><div class="bar-rail"><div class="bar-fill" style="width:${profile.rawScore}%"></div></div><div>${profile.rawScore}</div></div>
           <div class="pill-wrap" style="margin-top:12px">
             ${bandBadgeV6('score', profile.score)}
             ${labelPill(`综合带占比 ${fmtPct(scoreBand.rate)}`, 'blue')}
             ${bandBadgeV6('prevalence', profile.prevalence)}
-            ${labelPill(`常见度带占比 ${fmtPct(prevalenceBand.rate)}`, 'blue')}
+            ${labelPill(`结构常见度带占比 ${fmtPct(prevalenceBand.rate)}`, 'blue')}
             ${bandBadgeV6('balance', profile.balance)}
             ${labelPill(`均衡带占比 ${fmtPct(balanceBand.rate)}`, 'blue')}
           </div>
-          <div class="helper">综合评分现在被当成“评分带形态”而不是“越高越好”的目标值。推荐排序优先考虑是否落入历史高密集区间，再结合常见度、均衡度和过滤规则排序。</div>
+          <div class="helper">统一评分内核先算历史结构常见度、结构均衡度、异常安全度，再合成综合评分；其中“历史结构常见度”只描述形态冷热，不等于整组号码是否出现过。整组号码是否开过，单独看“历史整组复现”。</div>
           <div class="acc-sub" style="margin-top:8px">${escapeHtml(bandExplainV6('score', scoreBand))}</div>
         </div>
       </div>
@@ -2057,13 +2198,14 @@ const summary = DATA.summary;
           ${labelPill(`连号 ${profile.base.metrics.runLabel}`)}
           ${labelPill(`尾数 ${profile.base.metrics.tailPattern}`)}
           ${labelPill(`综合带 ${profile.scoreBand.min}-${profile.scoreBand.max}`, profile.scoreBand.tone)}
-          ${labelPill(`常见度带 ${profile.prevalenceBand.min}-${profile.prevalenceBand.max}`, profile.prevalenceBand.tone)}
+          ${labelPill(`结构常见度带 ${profile.prevalenceBand.min}-${profile.prevalenceBand.max}`, profile.prevalenceBand.tone)}
           ${labelPill(`均衡带 ${profile.balanceBand.min}-${profile.balanceBand.max}`, profile.balanceBand.tone)}
-          ${profile.base.metrics.exactIssue ? labelPill(`历史重复 ${profile.base.metrics.exactIssue}`, 'red') : labelPill('历史无完全重复', 'green')}
+          ${profile.base.metrics.exactIssue ? labelPill(`历史整组复现 第${profile.base.metrics.exactIssue}期`, 'red') : labelPill('历史整组复现 未出现', 'green')}
         </div>
         <div style="margin-top:12px"><div class="helper">推荐排序解释</div><div class="acc-sub" style="margin-top:8px">这组号码的“推荐排序分”不是另一个预测分，而是“原始结构分 + 评分带密度贴合度”的组合。它越高，只表示它更贴近你定义的历史主密集评分带。</div></div>
         <div style="margin-top:12px"><div class="helper">本组号码的正向标签</div><div class="pill-wrap" style="margin-top:8px">${profile.reasons.map(r => labelPill(r, 'green')).join('')}</div></div>
-        <div style="margin-top:12px"><div class="helper">命中的排除或风险标签</div><div class="pill-wrap" style="margin-top:8px">${ruleView}</div></div>
+        <div style="margin-top:12px"><div class="helper">命中的结构风险</div><div class="pill-wrap" style="margin-top:8px">${profile.riskHits.length ? profile.riskHits.map(r => labelPill(r, 'red')).join('') : labelPill('未触发明显异常', 'green')}</div></div>
+        <div style="margin-top:12px"><div class="helper">推荐池过滤结果</div><div class="pill-wrap" style="margin-top:8px">${ruleView}</div></div>
       </section>
 
       <section class="card section-card">
@@ -2095,9 +2237,9 @@ const summary = DATA.summary;
             <div class="acc-sub">${profile.reasons.slice(0, 4).map(escapeHtml).join(' / ')}</div>
           </div>
           <div class="acc-right">
-            ${labelPill(`推荐排序分 ${fmtScore(profile.recommendScore)}`, 'green')}
-            ${labelPill(`综合 ${fmtScore(profile.score)}`, 'blue')}
-            ${labelPill(`密集带贴合 ${fmtScore(profile.bandFit)}`, 'blue')}
+            ${labelPill(`推荐排序分 ${profile.recommendScore}`, 'green')}
+            ${labelPill(`综合 ${profile.score}`, 'blue')}
+            ${labelPill(`密集带贴合 ${profile.bandFit}`, 'blue')}
           </div>
         </summary>
         <div class="acc-body">
@@ -2106,7 +2248,7 @@ const summary = DATA.summary;
           <div class="metric-grid">
             <div class="metric"><div class="k">和值 / 跨度 / AC</div><div class="v">${profile.base.metrics.sum} / ${profile.base.metrics.span} / ${profile.base.metrics.ac}</div></div>
             <div class="metric"><div class="k">大小 / 奇偶 / 三区</div><div class="v">${profile.base.metrics.small}:${profile.base.metrics.big} / ${profile.base.metrics.odd}:${profile.base.metrics.even} / ${profile.base.metrics.z1}-${profile.base.metrics.z2}-${profile.base.metrics.z3}</div></div>
-            <div class="metric"><div class="k">评分带</div><div class="v">综 ${profile.scoreBand.min}-${profile.scoreBand.max} / 常 ${profile.prevalenceBand.min}-${profile.prevalenceBand.max} / 均 ${profile.balanceBand.min}-${profile.balanceBand.max}</div></div>
+            <div class="metric"><div class="k">评分带</div><div class="v">综 ${profile.scoreBand.min}-${profile.scoreBand.max} / 结 ${profile.prevalenceBand.min}-${profile.prevalenceBand.max} / 均 ${profile.balanceBand.min}-${profile.balanceBand.max}</div></div>
             <div class="metric"><div class="k">对最新一期</div><div class="v">重号 ${profile.base.metrics.latestOverlap} / 邻号 ${profile.base.metrics.latestNeighbors}</div></div>
           </div>
           <div>
@@ -2126,14 +2268,12 @@ const summary = DATA.summary;
     `;
   };
 
-  
-generateRecommendations = function() {
+  generateRecommendations = function() {
     state.recommend.options = readRecommendOptions();
     const opts = state.recommend.options;
     const pool = [];
     const seen = new Set();
-    const attempts = opts.preferBalanced ? 22000 : 18000;
-
+    const attempts = opts.preferBalanced ? 11000 : 8500;
     for (let i = 0; i < attempts; i++) {
       const cand = randomCandidate();
       const profile = candidateProfile(cand.reds, cand.blue, opts);
@@ -2142,159 +2282,23 @@ generateRecommendations = function() {
       seen.add(profile.key);
       pool.push(profile);
     }
-
-    const ranked = pool.sort((a,b)=>
-      (b.rawRecommendScore ?? b.recommendScore) - (a.rawRecommendScore ?? a.recommendScore) ||
-      (b.rawBandFit ?? b.bandFit) - (a.rawBandFit ?? a.bandFit) ||
-      (b.rawScore ?? b.score) - (a.rawScore ?? a.score) ||
-      a.key.localeCompare(b.key, 'zh-CN')
-    );
-
-    const scoreBandKey = item => `${item.scoreBand.min}-${item.scoreBand.max}`;
-    const prevalenceBandKey = item => `${item.prevalenceBand.min}-${item.prevalenceBand.max}`;
-    const balanceBandKey = item => `${item.balanceBand.min}-${item.balanceBand.max}`;
-    const comboKey = item => [prevalenceBandKey(item), balanceBandKey(item), scoreBandKey(item)].join('|');
-    const recBucketKey = item => `${Math.floor((item.rawRecommendScore ?? item.recommendScore) / 2) * 2}`;
-    const fitBucketKey = item => `${Math.floor((item.rawBandFit ?? item.bandFit) / 4) * 4}`;
-    const scoreBucketKey = item => `${Math.floor((item.rawScore ?? item.score) / 3) * 3}`;
-
-    const shortlist = [];
-    const scoreBandSeed = {};
-    const comboSeed = {};
-    for (const item of ranked) {
-      const sb = scoreBandKey(item);
-      const cb = comboKey(item);
-      if ((comboSeed[cb] || 0) >= 70) continue;
-      if ((scoreBandSeed[sb] || 0) >= 240 && shortlist.length >= 520) continue;
-      shortlist.push(item);
-      scoreBandSeed[sb] = (scoreBandSeed[sb] || 0) + 1;
-      comboSeed[cb] = (comboSeed[cb] || 0) + 1;
-      if (shortlist.length >= 1100) break;
-    }
-
+    const ranked = pool.sort((a,b)=>b.recommendScore - a.recommendScore || b.bandFit - a.bandFit || b.score - a.score || a.key.localeCompare(b.key, 'zh-CN'));
     const selected = [];
-    const redUse = {};
-    const blueUse = {};
-    const scoreBandUse = {};
-    const prevalenceBandUse = {};
-    const balanceBandUse = {};
-    const comboUse = {};
-    const recBucketUse = {};
-    const fitBucketUse = {};
-    const scoreBucketUse = {};
-
-    function updateUsage(item) {
-      item.reds.forEach(n => { redUse[n] = (redUse[n] || 0) + 1; });
-      blueUse[item.blue] = (blueUse[item.blue] || 0) + 1;
-      scoreBandUse[scoreBandKey(item)] = (scoreBandUse[scoreBandKey(item)] || 0) + 1;
-      prevalenceBandUse[prevalenceBandKey(item)] = (prevalenceBandUse[prevalenceBandKey(item)] || 0) + 1;
-      balanceBandUse[balanceBandKey(item)] = (balanceBandUse[balanceBandKey(item)] || 0) + 1;
-      comboUse[comboKey(item)] = (comboUse[comboKey(item)] || 0) + 1;
-      recBucketUse[recBucketKey(item)] = (recBucketUse[recBucketKey(item)] || 0) + 1;
-      fitBucketUse[fitBucketKey(item)] = (fitBucketUse[fitBucketKey(item)] || 0) + 1;
-      scoreBucketUse[scoreBucketKey(item)] = (scoreBucketUse[scoreBucketKey(item)] || 0) + 1;
-    }
-
-    function effectiveSetScore(item) {
-      const rawRec = item.rawRecommendScore ?? item.recommendScore;
-      const rawFit = item.rawBandFit ?? item.bandFit;
-      const rawScore = item.rawScore ?? item.score;
-      const sb = scoreBandKey(item);
-      const pb = prevalenceBandKey(item);
-      const bb = balanceBandKey(item);
-      const cb = comboKey(item);
-      const rb = recBucketKey(item);
-      const fb = fitBucketKey(item);
-      const scb = scoreBucketKey(item);
-
-      let score = rawRec * 1000 + rawFit * 8 + rawScore;
-
-      if (!scoreBandUse[sb]) score += 240;
-      if (!prevalenceBandUse[pb]) score += 120;
-      if (!balanceBandUse[bb]) score += 110;
-      if (!comboUse[cb]) score += 280;
-      if (!recBucketUse[rb]) score += 90;
-      if (!fitBucketUse[fb]) score += 75;
-      if (!scoreBucketUse[scb]) score += 100;
-
-      score -= (scoreBandUse[sb] || 0) * 190;
-      score -= (prevalenceBandUse[pb] || 0) * 105;
-      score -= (balanceBandUse[bb] || 0) * 95;
-      score -= (comboUse[cb] || 0) * 280;
-      score -= (recBucketUse[rb] || 0) * 90;
-      score -= (fitBucketUse[fb] || 0) * 80;
-      score -= (scoreBucketUse[scb] || 0) * 110;
-
-      let repeatedReds = 0;
-      let hardRedCap = false;
-      let redPenalty = 0;
-      item.reds.forEach(n => {
-        const used = redUse[n] || 0;
-        redPenalty += used * 150;
-        if (used >= 1) repeatedReds += 1;
-        if (used >= 2) hardRedCap = true;
-      });
-      if (hardRedCap) return -Infinity;
-      score -= redPenalty;
-      if (repeatedReds >= 3) score -= 320;
-      else if (repeatedReds === 2) score -= 140;
-
-      const blueUsed = blueUse[item.blue] || 0;
-      if (blueUsed >= 2) return -Infinity;
-      score -= blueUsed * 180;
-
-      if (selected.length) {
-        const overlaps = selected.map(s => countOverlap(s.reds, item.reds));
-        const maxOverlap = Math.max(...overlaps);
-        const totalOverlap = overlaps.reduce((a,b)=>a+b,0);
-        if (maxOverlap >= 4) return -Infinity;
-        score -= maxOverlap * maxOverlap * 140;
-        score -= totalOverlap * 36;
-      }
-
-      const freshReds = item.reds.filter(n => !redUse[n]).length;
-      score += freshReds * 22;
-      score += Math.random() * 0.0001;
-      return score;
-    }
-
-    while (selected.length < 5 && shortlist.length) {
-      let bestIndex = -1;
-      let bestScore = -Infinity;
-
-      for (let i = 0; i < shortlist.length; i++) {
-        const item = shortlist[i];
-        if (selected.find(s => s.key === item.key)) continue;
-        const eff = effectiveSetScore(item);
-        if (eff > bestScore) {
-          bestScore = eff;
-          bestIndex = i;
-        }
-      }
-
-      if (bestIndex === -1) break;
-      const picked = shortlist.splice(bestIndex, 1)[0];
-      picked.setPickScore = Math.round(bestScore * 10) / 10;
-      selected.push(picked);
-      updateUsage(picked);
-    }
-
     for (const item of ranked) {
       if (selected.length >= 5) break;
-      if (selected.find(s => s.key === item.key)) continue;
-      const eff = effectiveSetScore(item);
-      if (!Number.isFinite(eff)) continue;
-      item.setPickScore = Math.round(eff * 10) / 10;
-      selected.push(item);
-      updateUsage(item);
+      const denseEnough = ['主密集带','次密集带'].includes(item.prevalenceBand.densityTier) && ['主密集带','次密集带'].includes(item.balanceBand.densityTier);
+      if (!denseEnough && ranked.length > 40) continue;
+      if (selected.every(s => countOverlap(s.reds, item.reds) <= 3)) selected.push(item);
     }
-
+    for (const item of ranked) {
+      if (selected.length >= 5) break;
+      if (!selected.find(s => s.key === item.key)) selected.push(item);
+    }
     state.recommend.lastList = sortRecommendList(selected, state.recommend.sort);
     renderTabContent();
   };
 
   renderRecommendResult = function() {
-
     if (!state.recommend.lastList.length) return '<div class="empty">点击“推荐 5 组”后，这里显示结果。默认按推荐排序分展示，每组都能展开看命中形态与评分带。</div>';
     const list = sortRecommendList(state.recommend.lastList, state.recommend.sort);
     return `<div class="accordion-list">${list.map((item, idx) => renderRecommendationAccordion(item, idx)).join('')}</div>`;
@@ -2324,7 +2328,7 @@ generateRecommendations = function() {
           <div class="helper">这一版把综合评分、常见度、均衡度都视为“评分带形态”。重点不是追高分，而是观察历史开奖更集中落在哪些区间，并让推荐结果优先贴近这些主密集带。</div>
           <div class="metric-grid" style="margin-top:12px">
             <div class="metric"><div class="k">综合评分主密集带</div><div class="v">${scoreTop ? `${scoreTop.min}-${scoreTop.max}` : '—'}</div></div>
-            <div class="metric"><div class="k">历史常见度主密集带</div><div class="v">${prevalenceTop ? `${prevalenceTop.min}-${prevalenceTop.max}` : '—'}</div></div>
+            <div class="metric"><div class="k">历史结构常见度主密集带</div><div class="v">${prevalenceTop ? `${prevalenceTop.min}-${prevalenceTop.max}` : '—'}</div></div>
             <div class="metric"><div class="k">结构均衡度主密集带</div><div class="v">${balanceTop ? `${balanceTop.min}-${balanceTop.max}` : '—'}</div></div>
             <div class="metric"><div class="k">前3区间覆盖</div><div class="v">综 ${fmtPct(bandSystemV6.score.topCoverage3)} / 常 ${fmtPct(bandSystemV6.prevalence.topCoverage3)} / 均 ${fmtPct(bandSystemV6.balance.topCoverage3)}</div></div>
           </div>
@@ -2332,7 +2336,7 @@ generateRecommendations = function() {
       </details>
 
       ${renderScoreBandArchiveGroup('综合评分带档案', 'score')}
-      ${renderScoreBandArchiveGroup('历史常见度带档案', 'prevalence')}
+      ${renderScoreBandArchiveGroup('历史结构常见度带档案', 'prevalence')}
       ${renderScoreBandArchiveGroup('结构均衡度带档案', 'balance')}
 
       <details class="group-acc card">
@@ -2405,12 +2409,12 @@ generateRecommendations = function() {
             <label class="check-item"><input id="optExcludeZoneBreak" type="checkbox" ${o.excludeZoneBreak?'checked':''} /><div><div class="check-title">排除断区</div><div class="check-sub">1-11 / 12-22 / 23-33 任一区为空直接过滤。</div></div></label>
             <label class="check-item"><input id="optExcludeLowSum" type="checkbox" ${o.excludeLowSum?'checked':''} /><div><div class="check-title">排除极低和值</div><div class="check-sub">和值 ≤ 60 的组合直接过滤。</div></div></label>
             <label class="check-item"><input id="optExcludeHighSum" type="checkbox" ${o.excludeHighSum?'checked':''} /><div><div class="check-title">排除极高和值</div><div class="check-sub">和值 ≥ 140 的组合直接过滤。</div></div></label>
-            <label class="check-item"><input id="optExcludeLowAC" type="checkbox" ${o.excludeLowAC?'checked':''} /><div><div class="check-title">排除极低 AC</div><div class="check-sub">AC ≤ 2 的极端紧凑组合过滤。默认不勾选，保留给评分系统自然压低。</div></div></label>
+            <label class="check-item"><input id="optExcludeLowAC" type="checkbox" ${o.excludeLowAC?'checked':''} /><div><div class="check-title">排除极低 AC</div><div class="check-sub">AC ≤ 2 的离散度过低组合过滤。</div></div></label>
             <label class="check-item"><input id="optExcludeHighAC" type="checkbox" ${o.excludeHighAC?'checked':''} /><div><div class="check-title">排除极高 AC</div><div class="check-sub">AC ≥ 9 的极端离散组合过滤。</div></div></label>
             <label class="check-item"><input id="optExcludeRedBlueSame" type="checkbox" ${o.excludeRedBlueSame?'checked':''} /><div><div class="check-title">排除红蓝同号</div><div class="check-sub">蓝球与任一红球相同就过滤。</div></div></label>
             <label class="check-item"><input id="optExcludeHistoricalDuplicate" type="checkbox" ${o.excludeHistoricalDuplicate?'checked':''} /><div><div class="check-title">排除历史完全重复</div><div class="check-sub">历史里已开过的整组红蓝球直接过滤。</div></div></label>
             <label class="check-item"><input id="optAvoidLatestOverlap" type="checkbox" ${o.avoidLatestOverlap?'checked':''} /><div><div class="check-title">避免与最新一期高重合</div><div class="check-sub">与最新一期重合 4 个及以上红球直接过滤。</div></div></label>
-            <label class="check-item"><input id="optPreferBalanced" type="checkbox" ${o.preferBalanced?'checked':''} /><div><div class="check-title">排除低均衡结构</div><div class="check-sub">均衡度 &lt; 62 的组合直接过滤。默认不勾选，避免把过多候选先验剔除。</div></div></label>
+            <label class="check-item"><input id="optPreferBalanced" type="checkbox" ${o.preferBalanced?'checked':''} /><div><div class="check-title">优先均衡结构</div><div class="check-sub">压低大小、奇偶、三区明显失衡的组合。</div></div></label>
           </div>
           <div class="toolbar-row">
             <button class="btn" onclick="generateRecommendations()">推荐 5 组</button>
@@ -2418,12 +2422,12 @@ generateRecommendations = function() {
               <option value="recommend_desc" ${state.recommend.sort==='recommend_desc'?'selected':''}>按推荐排序分</option>
               <option value="bandfit_desc" ${state.recommend.sort==='bandfit_desc'?'selected':''}>按密集带贴合度</option>
               <option value="score_desc" ${state.recommend.sort==='score_desc'?'selected':''}>按综合评分</option>
-              <option value="prevalence_desc" ${state.recommend.sort==='prevalence_desc'?'selected':''}>按历史常见度</option>
+              <option value="prevalence_desc" ${state.recommend.sort==='prevalence_desc'?'selected':''}>按历史结构常见度</option>
               <option value="balance_desc" ${state.recommend.sort==='balance_desc'?'selected':''}>按结构均衡度</option>
               <option value="explore_sparse" ${state.recommend.sort==='explore_sparse'?'selected':''}>按探索稀疏带</option>
             </select>
           </div>
-          <div class="helper">推荐排序分 = 0.58×综合评分 + 0.42×密集带贴合度。默认只勾选高置信硬排除项（全奇/全偶、全同尾、全6连号、罕见长连号、断区、历史完全重复、与最新一期高重合）；和值、AC、红蓝同号、低均衡结构默认关闭，让它们先进入候选池，再由评分和评分带自然竞争。</div>
+          <div class="helper">推荐排序分 = 原始结构分（综合评分） + 评分带密度贴合度。这里的目标不是追求综合评分越高，而是更优先落入历史高密集评分带，尤其是结构常见度带和均衡度带。</div>
         </div>
       </section>
       <section class="card section-card">
@@ -2440,9 +2444,9 @@ generateRecommendations = function() {
         <div class="group-body">
           <div class="helper">核心变化：综合评分不是“高就更好”，而是“落在哪个历史评分带”。推荐排序分才是当前个人使用场景下的排序值。</div>
           <div class="accordion-list" style="margin-top:10px">
-            <details class="acc"><summary><div class="acc-left"><div class="acc-title">综合评分</div><div class="acc-sub">原始结构分，不等于推荐排序分</div></div></summary><div class="acc-body"><div class="acc-sub">综合评分 = 0.52×历史常见度 + 0.40×结构均衡度 + 0.08×保留分 − 规则命中轻微修正。它只描述这组号码在当前模型里的结构位置。</div></div></details>
+            <details class="acc"><summary><div class="acc-left"><div class="acc-title">综合评分</div><div class="acc-sub">原始结构分，不等于推荐排序分</div></div></summary><div class="acc-body"><div class="acc-sub">综合评分 = 0.42×历史结构常见度 + 0.33×结构均衡度 + 0.25×异常安全度；若命中严重异常，会先触发统一封顶。</div></div></details>
             <details class="acc"><summary><div class="acc-left"><div class="acc-title">评分带形态</div><div class="acc-sub">把综合评分、常见度、均衡度都按 4 分宽区间分箱</div></div></summary><div class="acc-body"><div class="acc-sub">例如 69-72、73-76。每个区间统计历史占比、当前遗漏、平均间隔。区间本身视为一种形态。</div></div></details>
-            <details class="acc"><summary><div class="acc-left"><div class="acc-title">密集带贴合度</div><div class="acc-sub">看三条评分轴是否落入历史高密集区间</div></div></summary><div class="acc-body"><div class="acc-sub">优先看常见度带和均衡度带，其次看综合评分带。带内历史占比越高，贴合度越高。</div></div></details>
+            <details class="acc"><summary><div class="acc-left"><div class="acc-title">密集带贴合度</div><div class="acc-sub">看三条评分轴是否落入历史高密集区间</div></div></summary><div class="acc-body"><div class="acc-sub">优先看结构常见度带和均衡度带，其次看综合评分带。带内历史占比越高，贴合度越高。</div></div></details>
             <details class="acc"><summary><div class="acc-left"><div class="acc-title">推荐排序分</div><div class="acc-sub">当前推荐页真正用来排序的分</div></div></summary><div class="acc-body"><div class="acc-sub">推荐排序分 = 0.58×综合评分 + 0.42×密集带贴合度。它表示“结构本身不过分极端，同时更贴近历史主密集评分带”。</div></div></details>
           </div>
         </div>
@@ -2487,7 +2491,7 @@ generateRecommendations = function() {
         </div>
       </section>
       ${renderScoreBandArchiveGroup('综合评分带档案', 'score')}
-      ${renderScoreBandArchiveGroup('历史常见度带档案', 'prevalence')}
+      ${renderScoreBandArchiveGroup('历史结构常见度带档案', 'prevalence')}
       ${renderScoreBandArchiveGroup('结构均衡度带档案', 'balance')}
       ${renderFormulaGuide()}
       <details class="group-acc card" open>
@@ -2506,7 +2510,753 @@ generateRecommendations = function() {
   window.analyzeCurrentNumbers = analyzeCurrentNumbers;
   window.generateRecommendations = generateRecommendations;
     renderAll();
+(function(){
+  const ANALYZE_OPTS = { ...neutralRecommendOptions };
+  state.recommend.sort = 'slot';
+  state.recommend.meta = null;
+
+  function copyHtmlTemplate() {
+    window.__HTML_TEMPLATE = document.documentElement.outerHTML;
+  }
+
+  function densityRank(tier) {
+    return ({ '主密集带': 3, '次密集带': 2, '常规带': 1, '稀疏带': 0, '未命中带': 0 })[tier] ?? 0;
+  }
+  function bandSig(p) {
+    return `${p.scoreBand.label}|${p.prevalenceBand.label}|${p.balanceBand.label}`;
+  }
+  function trackTag(profile) {
+    return profile.track === 'mild' ? '温和探索' : '保守';
+  }
+  function numericTooNear(a, b) {
+    return Math.abs(a.recommendScore - b.recommendScore) < 4 && Math.abs(a.score - b.score) < 4 && Math.abs(a.bandFit - b.bandFit) < 8;
+  }
+  function axisDiffCount(a, b) {
+    let diff = 0;
+    if (a.scoreBand.label !== b.scoreBand.label) diff += 1;
+    if (a.prevalenceBand.label !== b.prevalenceBand.label) diff += 1;
+    if (a.balanceBand.label !== b.balanceBand.label) diff += 1;
+    return diff;
+  }
+  function redUsageMap(list) {
+    const map = new Map();
+    list.forEach(item => item.reds.forEach(n => map.set(n, (map.get(n) || 0) + 1)));
+    return map;
+  }
+  function blueUsageMap(list) {
+    const map = new Map();
+    list.forEach(item => map.set(item.blue, (map.get(item.blue) || 0) + 1));
+    return map;
+  }
+  function exceedsUsage(selected, cand, track) {
+    const redMap = redUsageMap(selected);
+    const blueMap = blueUsageMap(selected);
+    const maxRed = track === 'mild' ? 2 : 2;
+    const maxBlue = 2;
+    if (cand.reds.some(n => (redMap.get(n) || 0) >= maxRed)) return true;
+    if ((blueMap.get(cand.blue) || 0) >= maxBlue) return true;
+    return false;
+  }
+  function conservativeEligible(p) {
+    return p.safety >= 80 && p.recommendScore >= 58 && p.bandFit >= 32 && p.score >= 68 && densityRank(p.prevalenceBand.densityTier) >= 1 && densityRank(p.balanceBand.densityTier) >= 1;
+  }
+  function mildExploreEligible(p) {
+    if (p.safety < 70 || p.recommendScore < 52 || p.bandFit < 30 || p.score < 50) return false;
+    if (p.base.metrics.sum <= 60 || p.base.metrics.sum >= 140) return false;
+    if (p.base.metrics.ac <= 2 || p.base.metrics.ac >= 9) return false;
+    if (['全6连号','1组5连','1组4连','3连+2连','4连+2连'].includes(p.base.metrics.runLabel)) return false;
+    const denseCount = [p.scoreBand, p.prevalenceBand, p.balanceBand].filter(b => densityRank(b.densityTier) >= 2).length;
+    return denseCount <= 2;
+  }
+  function mildExploreRank(p) {
+    const escapeBonus = (3 - densityRank(p.scoreBand.densityTier)) * 4 + (3 - densityRank(p.prevalenceBand.densityTier)) * 6 + (3 - densityRank(p.balanceBand.densityTier)) * 6;
+    const freshnessBonus = p.base.metrics.latestOverlap <= 2 ? 4 : 0;
+    return p.recommendScore * 0.34 + p.bandFit * 0.18 + p.score * 0.22 + p.safety * 0.18 + escapeBonus + freshnessBonus;
+  }
+  function conservativeRank(p) {
+    return p.score * 100 + p.safety * 10 + p.bandFit;
+  }
+  function slotAccept(selected, cand, slot, relax = 0) {
+    if (selected.find(x => x.key === cand.key)) return false;
+    if (exceedsUsage(selected, cand, slot.track)) return false;
+    for (const prev of selected) {
+      const overlap = countOverlap(prev.reds, cand.reds);
+      if (overlap > (slot.track === 'mild' ? 2 + relax : 3)) return false;
+      if (axisDiffCount(prev, cand) < Math.max(0, slot.minAxisDiff - relax)) return false;
+      if (numericTooNear(prev, cand) && !relax) return false;
+    }
+    if (!relax && selected.some(prev => bandSig(prev) === bandSig(cand))) return false;
+    return true;
+  }
+  function pickForSlot(list, selected, slot) {
+    for (let relax = 0; relax <= 2; relax++) {
+      for (const item of list) {
+        if (!slot.filter(item, relax)) continue;
+        if (slotAccept(selected, item, slot, relax)) return item;
+      }
+    }
+    return null;
+  }
+  function summarizeRecommendMeta(list) {
+    const byTrack = { conservative: 0, mild: 0 };
+    const scoreBands = new Map();
+    const prevBands = new Map();
+    const balBands = new Map();
+    list.forEach(item => {
+      byTrack[item.track] = (byTrack[item.track] || 0) + 1;
+      scoreBands.set(item.scoreBand.label, (scoreBands.get(item.scoreBand.label) || 0) + 1);
+      prevBands.set(item.prevalenceBand.label, (prevBands.get(item.prevalenceBand.label) || 0) + 1);
+      balBands.set(item.balanceBand.label, (balBands.get(item.balanceBand.label) || 0) + 1);
+    });
+    const fmtMap = (m) => [...m.entries()].map(([k,v]) => `${k}×${v}`).join(' / ') || '—';
+    return {
+      conservative: byTrack.conservative || 0,
+      mild: byTrack.mild || 0,
+      scoreBands: fmtMap(scoreBands),
+      prevalenceBands: fmtMap(prevBands),
+      balanceBands: fmtMap(balBands),
+    };
+  }
+
+  analyzeCurrentNumbers = function() {
+    const reds = parseRedInput(document.getElementById('analysisRedInput')?.value || '').sort((a,b)=>a-b);
+    const blue = parseBlueInput(document.getElementById('analysisBlueInput')?.value || '');
+    const err = validateNumbers(reds, blue);
+    const mount = document.getElementById('analysisResultMount');
+    if (err) {
+      state.analyze.lastProfile = null;
+      if (mount) mount.innerHTML = `<div class="empty">${err}</div>`;
+      return;
+    }
+    state.analyze.lastProfile = candidateProfile(reds, blue, ANALYZE_OPTS);
+    if (mount) mount.innerHTML = renderAnalysisResult();
+  };
+
+  renderAnalyze = function() {
+    return `
+      <section class="card section-card">
+        <div class="section-head"><h2>号码评分与形态识别</h2><div class="sub">这里使用与推荐页、历史回放完全一致的统一评分内核。历史开奖号码仍在“历史开奖查询”里看截止当时评分。</div></div>
+        <div class="toolbar">
+          <div class="toolbar-row">
+            <input class="input mono" id="analysisRedInput" style="flex:1 1 360px" placeholder="红球：例如 01 07 12 18 25 32" value="${state.analyze.lastProfile ? state.analyze.lastProfile.reds.map(ball).join(' ') : ''}" />
+            <input class="input mono" id="analysisBlueInput" style="max-width:220px" placeholder="蓝球：例如 09" value="${state.analyze.lastProfile ? ball(state.analyze.lastProfile.blue) : ''}" />
+          </div>
+          <div class="toolbar-row">
+            <button class="btn" onclick="analyzeCurrentNumbers()">分析并评分</button>
+          </div>
+          <div class="helper">说明：这里展示统一核心评分；推荐页上的勾选项只影响是否进入推荐池，不改变这组号码本身的核心分数。</div>
+        </div>
+      </section>
+      <div id="analysisResultMount">${renderAnalysisResult()}</div>
+    `;
+  };
+
+  renderAnalysisResult = function() {
+    const profile = state.analyze.lastProfile;
+    if (!profile) return '<div class="empty">先输入一组号码，再点击“分析并评分”。</div>';
+    const sortKey = state.analyze.sort;
+    const matched = sortStats(profile.matchedStats, sortKey);
+    const ruleView = profile.ruleHits.length ? profile.ruleHits.map(r => labelPill(r, 'red')).join('') : labelPill('独立评分视角下未触发明显排除项', 'green');
+    return `
+      <section class="card section-card">
+        <div class="section-head"><h3>当前号码评分</h3><div class="sub">${profile.reds.map(ball).join(' ')} + ${ball(profile.blue)}</div></div>
+        ${renderScoreBlock(profile, 'analyze')}
+        <div style="margin-top:14px">${renderBalls(profile.reds, profile.blue)}</div>
+        <div class="pill-wrap" style="margin-top:12px">
+          ${labelPill(`和值 ${profile.base.metrics.sum}`, 'blue')}
+          ${labelPill(`跨度 ${profile.base.metrics.span}`, 'blue')}
+          ${labelPill(`AC ${profile.base.metrics.ac}`, 'blue')}
+          ${labelPill(`连号 ${profile.base.metrics.runLabel}`)}
+          ${labelPill(`尾数 ${profile.base.metrics.tailPattern}`)}
+          ${labelPill(`综合带 ${profile.scoreBand.min}-${profile.scoreBand.max}`, profile.scoreBand.tone)}
+          ${labelPill(`结构常见度带 ${profile.prevalenceBand.min}-${profile.prevalenceBand.max}`, profile.prevalenceBand.tone)}
+          ${labelPill(`均衡带 ${profile.balanceBand.min}-${profile.balanceBand.max}`, profile.balanceBand.tone)}
+          ${profile.base.metrics.exactIssue ? labelPill(`历史整组复现 第${profile.base.metrics.exactIssue}期`, 'red') : labelPill('历史整组复现 未出现', 'green')}
+        </div>
+        <div style="margin-top:12px"><div class="helper">统一评分解释</div><div class="acc-sub" style="margin-top:8px">综合评分 = 历史结构常见度 × 0.42 + 结构均衡度 × 0.33 + 异常安全度 × 0.25；若命中严重异常，会按统一阈值封顶。“历史结构常见度”只描述形态冷热，不等于整组号码是否开过。历史回看使用同一公式，只是参考窗口截到当期之前。</div></div>
+        <div style="margin-top:12px"><div class="helper">本组号码的正向标签</div><div class="pill-wrap" style="margin-top:8px">${profile.reasons.map(r => labelPill(r, 'green')).join('')}</div></div>
+        <div style="margin-top:12px"><div class="helper">命中的结构风险</div><div class="pill-wrap" style="margin-top:8px">${profile.riskHits.length ? profile.riskHits.map(r => labelPill(r, 'red')).join('') : labelPill('未触发明显异常', 'green')}</div></div>
+        <div style="margin-top:12px"><div class="helper">推荐池过滤结果</div><div class="pill-wrap" style="margin-top:8px">${ruleView}</div></div>
+      </section>
+      <section class="card section-card">
+        <div class="section-head">
+          <h3>命中形态列表</h3>
+          <div class="toolbar-row" style="min-width:260px">
+            <select class="select" onchange="state.analyze.sort=this.value;renderTabContent()">
+              <option value="rate_desc" ${sortKey==='rate_desc'?'selected':''}>按历史频率从高到低</option>
+              <option value="rate_asc" ${sortKey==='rate_asc'?'selected':''}>按历史频率从低到高</option>
+              <option value="gap_desc" ${sortKey==='gap_desc'?'selected':''}>按当前遗漏从高到低</option>
+              <option value="name" ${sortKey==='name'?'selected':''}>按名称</option>
+            </select>
+          </div>
+        </div>
+        <div class="accordion-list">${matched.map(renderShapeAccordion).join('')}</div>
+      </section>
+    `;
+  };
+
+  renderRecommendationAccordion = function(profile, idx) {
+    const specials = profile.specialStats.length ? profile.specialStats.map(s => labelPill(s.display, 'yellow')).join('') : labelPill('未触发特殊形态', 'green');
+    const ruleView = profile.ruleHits.length ? profile.ruleHits.map(r => labelPill(r, 'red')).join('') : labelPill('通过当前过滤规则', 'green');
+    const mainHits = sortStats(profile.matchedStats.filter(s => !['special_shape'].includes(s.type)), 'rate_desc').slice(0, 8).map(s => labelPill(s.display, 'blue')).join('');
+    return `
+      <details class="acc" ${idx < 2 ? 'open' : ''}>
+        <summary>
+          <div class="acc-left">
+            <div class="acc-title">推荐 ${idx + 1} · ${profile.reds.map(ball).join(' ')} + ${ball(profile.blue)} · ${trackTag(profile)}</div>
+            <div class="acc-sub">${(profile.slotLabel || trackTag(profile))} / ${profile.reasons.slice(0, 4).map(escapeHtml).join(' / ')}</div>
+          </div>
+          <div class="acc-right">
+            ${labelPill(`推荐排序分 ${profile.recommendScore}`, 'green')}
+            ${labelPill(`综合 ${profile.score}`, 'blue')}
+            ${labelPill(`密集带贴合 ${profile.bandFit}`, 'blue')}
+          </div>
+        </summary>
+        <div class="acc-body">
+          <div>${renderBalls(profile.reds, profile.blue)}</div>
+          ${renderScoreBlock(profile, 'recommend')}
+          <div class="metric-grid">
+            <div class="metric"><div class="k">推荐轨道</div><div class="v">${profile.slotLabel || trackTag(profile)}</div></div>
+            <div class="metric"><div class="k">和值 / 跨度 / AC</div><div class="v">${profile.base.metrics.sum} / ${profile.base.metrics.span} / ${profile.base.metrics.ac}</div></div>
+            <div class="metric"><div class="k">大小 / 奇偶 / 三区</div><div class="v">${profile.base.metrics.small}:${profile.base.metrics.big} / ${profile.base.metrics.odd}:${profile.base.metrics.even} / ${profile.base.metrics.z1}-${profile.base.metrics.z2}-${profile.base.metrics.z3}</div></div>
+            <div class="metric"><div class="k">评分带</div><div class="v">综 ${profile.scoreBand.min}-${profile.scoreBand.max} / 结 ${profile.prevalenceBand.min}-${profile.prevalenceBand.max} / 均 ${profile.balanceBand.min}-${profile.balanceBand.max}</div></div>
+          </div>
+          <div><div class="helper">形态分析</div><div class="pill-wrap" style="margin-top:8px">${mainHits}</div></div>
+          <div><div class="helper">命中的特殊形态</div><div class="pill-wrap" style="margin-top:8px">${specials}</div></div>
+          <div><div class="helper">过滤结果</div><div class="pill-wrap" style="margin-top:8px">${ruleView}</div></div>
+        </div>
+      </details>
+    `;
+  };
+
+  sortRecommendList = function(list, key) {
+    const arr = [...list];
+    if (key === 'slot') return arr.sort((a,b)=>(a.slotOrder||0)-(b.slotOrder||0));
+    if (key === 'recommend_desc') arr.sort((a,b)=>b.recommendScore - a.recommendScore || b.bandFit - a.bandFit || b.score - a.score || a.key.localeCompare(b.key,'zh-CN'));
+    else if (key === 'bandfit_desc') arr.sort((a,b)=>b.bandFit - a.bandFit || b.recommendScore - a.recommendScore || b.score - a.score);
+    else if (key === 'score_desc') arr.sort((a,b)=>b.score - a.score || b.bandFit - a.bandFit || a.key.localeCompare(b.key,'zh-CN'));
+    else if (key === 'prevalence_desc') arr.sort((a,b)=>b.prevalence - a.prevalence || b.recommendScore - a.recommendScore);
+    else if (key === 'balance_desc') arr.sort((a,b)=>b.balance - a.balance || b.recommendScore - a.recommendScore);
+    else if (key === 'explore_sparse') arr.sort((a,b)=>a.bandFit - b.bandFit || b.score - a.score);
+    return arr;
+  };
+
+  generateRecommendations = function() {
+    state.recommend.options = readRecommendOptions();
+    const opts = state.recommend.options;
+    const pool = [];
+    const seen = new Set();
+    const attempts = opts.preferBalanced ? 18000 : 14000;
+    for (let i = 0; i < attempts; i++) {
+      const cand = randomCandidate();
+      const profile = candidateProfile(cand.reds, cand.blue, opts);
+      if (profile.ruleHits.length) continue;
+      if (seen.has(profile.key)) continue;
+      seen.add(profile.key);
+      pool.push(profile);
+    }
+    const conservative = pool.filter(conservativeEligible).sort((a,b)=>conservativeRank(b) - conservativeRank(a) || b.balance - a.balance || a.key.localeCompare(b.key, 'zh-CN'));
+    const mild = pool.filter(mildExploreEligible).sort((a,b)=>mildExploreRank(b) - mildExploreRank(a) || a.key.localeCompare(b.key, 'zh-CN'));
+    const slots = [
+      { track:'conservative', slotOrder:1, slotLabel:'保守1 · 主密集核心位', minAxisDiff:0, filter:(p, relax)=>p.safety >= 82 - relax*4 && p.recommendScore >= 60 - relax*4 && p.bandFit >= 40 - relax*8 && p.score >= 68 - relax*3 },
+      { track:'conservative', slotOrder:2, slotLabel:'保守2 · 主密集扩展位', minAxisDiff:1, filter:(p, relax)=>p.safety >= 78 - relax*4 && p.recommendScore >= 56 - relax*4 && p.bandFit >= 34 - relax*8 && p.score >= 64 - relax*3 },
+      { track:'conservative', slotOrder:3, slotLabel:'保守3 · 保守差异位', minAxisDiff:2, filter:(p, relax)=>p.safety >= 72 - relax*4 && p.recommendScore >= 52 - relax*4 && p.bandFit >= 28 - relax*8 && p.score >= 60 - relax*3 },
+      { track:'mild', slotOrder:4, slotLabel:'温和探索1 · 次主区探索', minAxisDiff:2, filter:(p, relax)=>p.safety >= 70 - relax*4 && p.recommendScore >= 56 - relax*4 && p.bandFit >= 38 - relax*8 && p.score >= 54 - relax*3 && mildExploreEligible(p) },
+      { track:'mild', slotOrder:5, slotLabel:'温和探索2 · 温和补充位', minAxisDiff:2, filter:(p, relax)=>p.safety >= 68 - relax*4 && p.recommendScore >= 52 - relax*4 && p.bandFit >= 32 - relax*8 && p.score >= 50 - relax*3 && mildExploreEligible(p) },
+    ];
+    const selected = [];
+    for (const slot of slots) {
+      const source = slot.track === 'mild' ? mild : conservative;
+      const picked = pickForSlot(source, selected, slot);
+      if (picked) {
+        picked.track = slot.track;
+        picked.slotOrder = slot.slotOrder;
+        picked.slotLabel = slot.slotLabel;
+        selected.push(picked);
+      }
+    }
+    if (selected.length < 5) {
+      const fallback = [...pool].sort((a,b)=>b.recommendScore - a.recommendScore || b.bandFit - a.bandFit || b.score - a.score);
+      for (const item of fallback) {
+        if (selected.length >= 5) break;
+        const track = selected.filter(x=>x.track==='conservative').length < 3 ? 'conservative' : 'mild';
+        const slot = { track, minAxisDiff: track === 'mild' ? 1 : 0 };
+        if (!slotAccept(selected, item, slot, 2)) continue;
+        item.track = track;
+        item.slotOrder = selected.length + 1;
+        item.slotLabel = track === 'mild' ? '温和探索 · 回填位' : '保守 · 回填位';
+        selected.push(item);
+      }
+    }
+    selected.sort((a,b)=>(a.slotOrder||0) - (b.slotOrder||0));
+    state.recommend.lastList = selected;
+    state.recommend.meta = summarizeRecommendMeta(selected);
+    renderTabContent();
+  };
+
+  renderRecommendResult = function() {
+    if (!state.recommend.lastList.length) return '<div class="empty">点击“推荐 5 组”后，这里显示结果。当前逻辑固定输出 3 组保守 + 2 组温和探索，且都必须满足 UI 里当前勾选的过滤组合。</div>';
+    const list = sortRecommendList(state.recommend.lastList, state.recommend.sort || 'slot');
+    const meta = state.recommend.meta || summarizeRecommendMeta(list);
+    return `
+      <div class="card section-card" style="margin-bottom:16px">
+        <div class="section-head"><h3>推荐集概览</h3><div class="sub">固定结构：3 组保守 + 2 组温和探索。温和探索只是在评分带位置上略偏离主密集带，不会绕开你当前勾选的硬过滤项。</div></div>
+        <div class="pill-wrap">
+          ${labelPill(`保守 ${meta.conservative} 组`, 'green')}
+          ${labelPill(`温和探索 ${meta.mild} 组`, 'blue')}
+          ${labelPill(`综合带分布 ${meta.scoreBands}`, 'blue')}
+          ${labelPill(`结构常见度带分布 ${meta.prevalenceBands}`, 'blue')}
+          ${labelPill(`均衡度带分布 ${meta.balanceBands}`, 'blue')}
+        </div>
+      </div>
+      <div class="accordion-list">${list.map((item, idx) => renderRecommendationAccordion(item, idx)).join('')}</div>`;
+  };
+
+  renderRecommend = function() {
+    const o = state.recommend.options;
+    return `
+      <section class="card section-card">
+        <div class="section-head"><h2>本期推荐</h2><div class="sub">固定输出 3 组保守 + 2 组温和探索。两条轨道都必须先通过你当前勾选的过滤规则，然后再按各自目标选集。</div></div>
+        <div class="toolbar">
+          <div class="checkbox-grid">
+            <label class="check-item"><input id="optExcludeAllOddEven" type="checkbox" ${o.excludeAllOddEven?'checked':''} /><div><div class="check-title">排除全奇 / 全偶</div><div class="check-sub">6 个红球全奇或全偶直接过滤。</div></div></label>
+            <label class="check-item"><input id="optExcludeSameTail" type="checkbox" ${o.excludeSameTail?'checked':''} /><div><div class="check-title">排除全同尾</div><div class="check-sub">个位尾数 6 球全相同直接过滤。</div></div></label>
+            <label class="check-item"><input id="optExcludeFullRun" type="checkbox" ${o.excludeFullRun?'checked':''} /><div><div class="check-title">排除全 6 连号</div><div class="check-sub">极端长连号直接过滤。</div></div></label>
+            <label class="check-item"><input id="optExcludeRareRun" type="checkbox" ${o.excludeRareRun?'checked':''} /><div><div class="check-title">排除罕见长连号</div><div class="check-sub">1 组 4 连、1 组 5 连、3 连+2 连等过滤。</div></div></label>
+            <label class="check-item"><input id="optExcludeZoneBreak" type="checkbox" ${o.excludeZoneBreak?'checked':''} /><div><div class="check-title">排除断区</div><div class="check-sub">1-11 / 12-22 / 23-33 任一区为空直接过滤。</div></div></label>
+            <label class="check-item"><input id="optExcludeLowSum" type="checkbox" ${o.excludeLowSum?'checked':''} /><div><div class="check-title">排除极低和值</div><div class="check-sub">和值 ≤ 60 的组合直接过滤。</div></div></label>
+            <label class="check-item"><input id="optExcludeHighSum" type="checkbox" ${o.excludeHighSum?'checked':''} /><div><div class="check-title">排除极高和值</div><div class="check-sub">和值 ≥ 140 的组合直接过滤。</div></div></label>
+            <label class="check-item"><input id="optExcludeLowAC" type="checkbox" ${o.excludeLowAC?'checked':''} /><div><div class="check-title">排除极低 AC</div><div class="check-sub">AC ≤ 2 的离散度过低组合过滤。</div></div></label>
+            <label class="check-item"><input id="optExcludeHighAC" type="checkbox" ${o.excludeHighAC?'checked':''} /><div><div class="check-title">排除极高 AC</div><div class="check-sub">AC ≥ 9 的极端离散组合过滤。</div></div></label>
+            <label class="check-item"><input id="optExcludeRedBlueSame" type="checkbox" ${o.excludeRedBlueSame?'checked':''} /><div><div class="check-title">排除红蓝同号</div><div class="check-sub">蓝球与任一红球相同就过滤。</div></div></label>
+            <label class="check-item"><input id="optExcludeHistoricalDuplicate" type="checkbox" ${o.excludeHistoricalDuplicate?'checked':''} /><div><div class="check-title">排除历史完全重复</div><div class="check-sub">历史里已开过的整组红蓝球直接过滤。</div></div></label>
+            <label class="check-item"><input id="optAvoidLatestOverlap" type="checkbox" ${o.avoidLatestOverlap?'checked':''} /><div><div class="check-title">避免与最新一期高重合</div><div class="check-sub">与最新一期重合 4 个及以上红球直接过滤。</div></div></label>
+            <label class="check-item"><input id="optPreferBalanced" type="checkbox" ${o.preferBalanced?'checked':''} /><div><div class="check-title">排除低均衡结构</div><div class="check-sub">当前逻辑下，这一项属于硬过滤，不是软偏好。</div></div></label>
+          </div>
+          <div class="toolbar-row">
+            <button class="btn" onclick="generateRecommendations()">推荐 5 组</button>
+          </div>
+          <div class="helper">推荐排序分 = 0.72 × 综合评分 + 0.28 × 密集带贴合度。所有候选号先经过同一套综合评分与安全阈值，再做 3 组保守 + 2 组温和探索分层。</div>
+        </div>
+      </section>
+      <section class="card section-card">
+        <div class="section-head"><h3>推荐结果</h3><div class="sub">每组都附带形态分析、三条评分轴的评分带和密度解释。</div></div>
+        ${renderRecommendResult()}
+      </section>
+    `;
+  };
+
+  function renderFormulaGuideFinal() {
+    return `
+      <details class="group-acc card">
+        <summary>评分逻辑与名词解释</summary>
+        <div class="group-body">
+          <div class="helper">整个系统只保留一套统一评分逻辑：当前号码与推荐使用全历史窗口，历史开奖回看使用截止当时窗口；算法、阈值与词典完全一致。</div>
+          <div class="accordion-list" style="margin-top:10px">
+            <details class="acc"><summary><div class="acc-left"><div class="acc-title">当前最终模型评分</div><div class="acc-sub">号码评分区与推荐区使用的主评分</div></div></summary><div class="acc-body"><div class="acc-sub">综合评分 = 0.42×历史结构常见度 + 0.33×结构均衡度 + 0.25×异常安全度；若命中严重异常，会先触发统一封顶。号码评分区、推荐区与历史回看共享同一内核，只是历史回看改用截止当时窗口。</div></div></details>
+            <details class="acc"><summary><div class="acc-left"><div class="acc-title">截止当时评分</div><div class="acc-sub">历史开奖与最近开奖使用</div></div></summary><div class="acc-body"><div class="acc-sub">历史开奖卡片统一显示“截止当时”的评分，不让未来数据泄漏到过去开奖里。它与当前号码评分使用同一算法，只是参考窗口截断到当期之前。</div></div></details>
+            <details class="acc"><summary><div class="acc-left"><div class="acc-title">密集带贴合度</div><div class="acc-sub">看三条评分轴是否落入历史高密集区间</div></div></summary><div class="acc-body"><div class="acc-sub">优先看结构常见度带和均衡度带，其次看综合评分带。带内历史占比越高，贴合度越高。</div></div></details>
+            <details class="acc"><summary><div class="acc-left"><div class="acc-title">推荐排序分</div><div class="acc-sub">推荐页真正用来排序的分</div></div></summary><div class="acc-body"><div class="acc-sub">推荐排序分 = 0.72×综合评分 + 0.28×密集带贴合度。当前推荐器固定输出 3 组保守 + 2 组温和探索，两条轨道都必须先通过统一安全阈值，再叠加你勾选的过滤条件。</div></div></details>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+  renderFormulaGuide = renderFormulaGuideFinal;
+
+  function ensureSyncUi() {
+    if (document.getElementById('syncActionWrap')) return;
+    const hero = document.querySelector('.hero-note');
+    if (!hero || !hero.parentElement) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'syncActionWrap';
+    wrap.style.marginTop = '14px';
+    wrap.innerHTML = `
+      <div class="toolbar-row" style="justify-content:flex-end;gap:10px;flex-wrap:wrap">
+        <button class="btn secondary" id="syncCsvBtn" type="button">同步数据</button>
+        <input id="syncCsvInput" type="file" accept=".csv,text/csv" style="display:none" />
+      </div>
+      <div id="syncStatusMeta" class="helper" style="margin-top:8px;text-align:right">空闲</div>
+      <pre id="syncStatusLog" class="helper" style="display:none;white-space:pre-wrap;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.08);padding:12px;border-radius:12px;margin-top:10px;max-height:220px;overflow:auto"></pre>
+    `;
+    hero.parentElement.appendChild(wrap);
+    const btn = document.getElementById('syncCsvBtn');
+    const input = document.getElementById('syncCsvInput');
+    btn?.addEventListener('click', () => input?.click());
+    input?.addEventListener('change', async (ev) => {
+      const file = ev.target && ev.target.files && ev.target.files[0];
+      if (!file) return;
+      await importCsvAndSync(file);
+      ev.target.value = '';
+    });
+  }
+
+  const syncRuntime = { busy:false, lines:['就绪。选择 CSV 后，会按期号只合并新期并重算数据包。'] };
+  function syncLog(line) {
+    const ts = new Date();
+    const stamp = `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')} ${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}:${String(ts.getSeconds()).padStart(2,'0')}`;
+    syncRuntime.lines.push(`[${stamp}] ${line}`);
+    syncRuntime.lines = syncRuntime.lines.slice(-80);
+    const logEl = document.getElementById('syncStatusLog');
+    const metaEl = document.getElementById('syncStatusMeta');
+    if (logEl) {
+      logEl.style.display = 'block';
+      logEl.textContent = syncRuntime.lines.join('\n');
+    }
+    if (metaEl) metaEl.textContent = syncRuntime.busy ? '执行中' : '空闲';
+  }
+  function setSyncBusy(busy) {
+    syncRuntime.busy = !!busy;
+    const btn = document.getElementById('syncCsvBtn');
+    const metaEl = document.getElementById('syncStatusMeta');
+    if (btn) {
+      btn.disabled = syncRuntime.busy;
+      btn.textContent = syncRuntime.busy ? '同步中…' : '同步数据';
+    }
+    if (metaEl) metaEl.textContent = syncRuntime.busy ? '执行中' : '空闲';
+  }
+  function normalizeDate(input) {
+    const s = String(input || '').trim();
+    const m = s.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+    if (!m) return '';
+    return `${m[1]}-${String(Number(m[2])).padStart(2,'0')}-${String(Number(m[3])).padStart(2,'0')}`;
+  }
+  function parseCsvLine(line) {
+    const out = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = !inQuotes;
+      } else if (ch === ',' && !inQuotes) {
+        out.push(cur); cur = '';
+      } else cur += ch;
+    }
+    out.push(cur);
+    return out.map(v => String(v).trim());
+  }
+  function decodeCsvBuffer(buffer) {
+    for (const enc of ['utf-8', 'gbk', 'gb18030']) {
+      try {
+        const text = new TextDecoder(enc, { fatal: false }).decode(buffer);
+        if (text.includes('期号') && text.includes('红球')) return text;
+      } catch (err) {}
+    }
+    return new TextDecoder('utf-8').decode(buffer);
+  }
+  function parseCsvRows(text) {
+    const lines = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(Boolean);
+    if (!lines.length) throw new Error('CSV 为空。');
+    const header = parseCsvLine(lines[0]);
+    const normalizeHeader = h => String(h || '').replace(/\s+/g, '').toLowerCase();
+    const headerMap = {};
+    header.forEach((h, idx) => { headerMap[normalizeHeader(h)] = idx; });
+    const pickIndex = names => {
+      for (const n of names) {
+        const idx = headerMap[normalizeHeader(n)];
+        if (idx !== undefined) return idx;
+      }
+      return -1;
+    };
+    const issueIdx = pickIndex(['期号','issue','开奖期号']);
+    const dateIdx = pickIndex(['开奖日期','日期','draw_date','date']);
+    const redsIdx = pickIndex(['红球','reds','red_balls','redballs']);
+    const blueIdx = pickIndex(['蓝球','blue','blue_ball','blueball']);
+    if ([issueIdx, dateIdx, redsIdx, blueIdx].some(v => v < 0)) throw new Error('CSV 表头不匹配。至少需要：期号、开奖日期、红球、蓝球。');
+    const rows = [];
+    const seen = new Set();
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseCsvLine(lines[i]);
+      const issue = String(cols[issueIdx] || '').trim();
+      const date = normalizeDate(cols[dateIdx] || '');
+      const reds = ((cols[redsIdx] || '').match(/\d+/g) || []).map(Number).sort((a,b)=>a-b);
+      const blue = Number(((cols[blueIdx] || '').match(/\d+/g) || [])[0]);
+      if (!issue || !date) continue;
+      if (seen.has(issue)) continue;
+      seen.add(issue);
+      if (reds.length !== 6) throw new Error(`期号 ${issue} 的红球不是 6 个。`);
+      if (new Set(reds).size !== 6) throw new Error(`期号 ${issue} 的红球存在重复。`);
+      if (reds.some(n => !Number.isInteger(n) || n < 1 || n > 33)) throw new Error(`期号 ${issue} 的红球超出 1-33。`);
+      if (!Number.isInteger(blue) || blue < 1 || blue > 16) throw new Error(`期号 ${issue} 的蓝球超出 1-16。`);
+      rows.push({ issue, date, reds, blue });
+    }
+    rows.sort((a,b)=>a.issue.localeCompare(b.issue, 'zh-CN'));
+    return rows;
+  }
+  function inferRefCategory(type, key) {
+    if (type === 'special_shape') return 'special';
+    if (type === 'red_blue_same' && key === '红蓝同号') return 'special';
+    if (type === 'ac_value') {
+      const n = Number(key);
+      if (Number.isFinite(n) && (n <= 2 || n >= 9)) return 'special';
+    }
+    if (type === 'consecutive_structure' && ['1组4连','1组5连','3连+2连','4连+2连','全6连号'].includes(key)) return 'special';
+    if (type === 'tail_pattern' && key === '全同尾') return 'special';
+    return 'regular';
+  }
+  function inferStatKind(type, key, baseTypeMeta) {
+    const meta = baseTypeMeta[type] || {};
+    if (meta.defaultKind === 'special') return 'special';
+    return inferRefCategory(type, key) === 'special' ? 'special' : 'regular';
+  }
+  function addShapeRef(refs, type, key, display) {
+    refs.push({ type, key: String(key), display, category: inferRefCategory(type, String(key)) });
+  }
+  function buildDrawsDescFromRaw(rawAsc) {
+    const drawsAscLocal = [];
+    for (let idx = 0; idx < rawAsc.length; idx++) {
+      const raw = rawAsc[idx];
+      const reds = [...raw.reds].sort((a,b)=>a-b);
+      const blue = raw.blue;
+      const prev = idx > 0 ? rawAsc[idx - 1] : null;
+      const refs = [];
+      const small = reds.filter(n => n <= 16).length;
+      const big = 6 - small;
+      const odd = reds.filter(n => n % 2 === 1).length;
+      const even = 6 - odd;
+      const z1 = reds.filter(n => n >= 1 && n <= 11).length;
+      const z2 = reds.filter(n => n >= 12 && n <= 22).length;
+      const z3 = 6 - z1 - z2;
+      const m0 = reds.filter(n => n % 3 === 0).length;
+      const m1 = reds.filter(n => n % 3 === 1).length;
+      const m2 = 6 - m0 - m1;
+      const breakParts = [];
+      if (z1 === 0) breakParts.push('断1区');
+      if (z2 === 0) breakParts.push('断2区');
+      if (z3 === 0) breakParts.push('断3区');
+      const zoneBreak = breakParts.length ? breakParts.join('+') : '不断区';
+      const runLabel = getConsecutiveLabel(reds);
+      const tailPattern = getTailPattern(reds);
+      const sumValue = reds.reduce((a,b)=>a+b,0);
+      const span = reds[5] - reds[0];
+      const ac = getAC(reds);
+      addShapeRef(refs, 'size_ratio', `${small}:${big}`, `大小比 ${small}:${big}`);
+      addShapeRef(refs, 'odd_even_ratio', `${odd}:${even}`, `奇偶比 ${odd}:${even}`);
+      addShapeRef(refs, 'zone_distribution', `${z1}-${z2}-${z3}`, `三区比 ${z1}-${z2}-${z3}`);
+      addShapeRef(refs, 'zone_break', zoneBreak, `断区 ${zoneBreak}`);
+      addShapeRef(refs, 'mod012_distribution', `${m0}-${m1}-${m2}`, `012路比 ${m0}-${m1}-${m2}`);
+      addShapeRef(refs, 'tail_pattern', tailPattern, `尾数组型 ${tailPattern}`);
+      addShapeRef(refs, 'consecutive_structure', runLabel, `连号结构 ${runLabel}`);
+      addShapeRef(refs, 'sum_bucket', getSumBucket(sumValue), `和值区间 ${getSumBucket(sumValue)}`);
+      addShapeRef(refs, 'span_bucket', getSpanBucket(span), `跨度区间 ${getSpanBucket(span)}`);
+      addShapeRef(refs, 'ac_value', String(ac), `AC值 ${ac}`);
+      const blueSize = blue <= 8 ? '小' : '大';
+      const blueOE = blue % 2 ? '奇' : '偶';
+      addShapeRef(refs, 'blue_size', blueSize, `蓝球大小 ${blueSize}`);
+      addShapeRef(refs, 'blue_odd_even', blueOE, `蓝球奇偶 ${blueOE}`);
+      addShapeRef(refs, 'blue_mod012', `${blue % 3}路`, `蓝球012路 ${blue % 3}路`);
+      const sameLabel = reds.includes(blue) ? '红蓝同号' : '红蓝不同号';
+      addShapeRef(refs, 'red_blue_same', sameLabel, sameLabel);
+      const rbMin = Math.min(...reds.map(n => Math.abs(n - blue)));
+      const rbMinBucket = rbMin === 0 ? '0' : (rbMin === 1 ? '1' : (rbMin === 2 ? '2' : '3+'));
+      addShapeRef(refs, 'red_blue_min_gap', rbMinBucket, `红蓝最小差 ${rbMinBucket}`);
+      addShapeRef(refs, 'rb_parity_combo', `蓝${blueOE} + 红奇偶比 ${odd}:${even}`, `红蓝奇偶联动 蓝${blueOE} / 红${odd}:${even}`);
+      addShapeRef(refs, 'rb_size_combo', `蓝${blueSize} + 红大小比 ${small}:${big}`, `红蓝大小联动 蓝${blueSize} / 红${small}:${big}`);
+      addShapeRef(refs, 'rb_mod012_combo', `蓝${blue % 3}路 + 红012比 ${m0}-${m1}-${m2}`, `红蓝012联动 蓝${blue % 3}路 / 红${m0}-${m1}-${m2}`);
+      let repeatCount = 0;
+      let neighborCount = 0;
+      if (prev) {
+        const prevSet = new Set(prev.reds);
+        const prevNeighborSet = new Set();
+        prev.reds.forEach(x => { if (x > 1) prevNeighborSet.add(x - 1); if (x < 33) prevNeighborSet.add(x + 1); });
+        repeatCount = reds.filter(x => prevSet.has(x)).length;
+        neighborCount = reds.filter(x => !prevSet.has(x) && prevNeighborSet.has(x)).length;
+      }
+      addShapeRef(refs, 'repeat_count', String(repeatCount), `重号 ${repeatCount}`);
+      addShapeRef(refs, 'neighbor_count', String(neighborCount), `邻号 ${neighborCount}`);
+      const specials = [];
+      if (odd === 6) addShapeRef(refs, 'special_shape', '全奇', '全奇');
+      if (even === 6) addShapeRef(refs, 'special_shape', '全偶', '全偶');
+      if (tailPattern === '全同尾') addShapeRef(refs, 'special_shape', '全同尾', '全同尾');
+      if (runLabel === '全6连号') addShapeRef(refs, 'special_shape', '全6连号', '全6连号');
+      if (breakParts.length) addShapeRef(refs, 'special_shape', '断区形态', '断区形态');
+      if (sumValue <= 60) addShapeRef(refs, 'special_shape', '极低和值', '极低和值');
+      if (sumValue >= 140) addShapeRef(refs, 'special_shape', '极高和值', '极高和值');
+      if (ac <= 2) addShapeRef(refs, 'special_shape', '极低AC值', '极低AC值');
+      if (ac >= 9) addShapeRef(refs, 'special_shape', '极高AC值', '极高AC值');
+      if (['1组5连', '1组4连', '3连+2连', '4连+2连'].includes(runLabel)) addShapeRef(refs, 'special_shape', '罕见连号结构', '罕见连号结构');
+      refs.filter(ref => ref.category === 'special').forEach(ref => specials.push(ref.display));
+      const headlineOrder = ['size_ratio','odd_even_ratio','zone_break','consecutive_structure','sum_bucket'];
+      const headlineTags = headlineOrder.map(type => refs.find(ref => ref.type === type)?.display).filter(Boolean);
+      drawsAscLocal.push({
+        issue: raw.issue,
+        date: raw.date,
+        reds,
+        blue,
+        metrics: { sum: sumValue, span, ac, small, big, odd, even, z1, z2, z3, m0, m1, m2, breakParts, zoneBreak, runLabel, tailPattern, repeatCount, neighborCount },
+        shape_refs: refs,
+        specials,
+        headline_tags: headlineTags,
+      });
+    }
+    return [...drawsAscLocal].sort((a,b)=>b.issue.localeCompare(a.issue, 'zh-CN'));
+  }
+  function buildShapeStatsFromDraws(drawsDescLocal, baseTypeMeta) {
+    const drawsAscLocal = [...drawsDescLocal].reverse();
+    const map = new Map();
+    drawsAscLocal.forEach(draw => {
+      draw.shape_refs.forEach(ref => {
+        const id = `${ref.type}::${ref.key}`;
+        if (!map.has(id)) {
+          map.set(id, { id, type: ref.type, key: ref.key, display: ref.display, group: baseTypeMeta[ref.type]?.group || ref.type, label: baseTypeMeta[ref.type]?.label || ref.type, kind: inferStatKind(ref.type, ref.key, baseTypeMeta), occurrence_count: 0, issue_dates: [] });
+        }
+        const item = map.get(id);
+        item.occurrence_count += 1;
+        item.issue_dates.push({ issue: draw.issue, date: draw.date });
+      });
+    });
+    const totalDraws = drawsDescLocal.length || 1;
+    const latestIndexMap = Object.fromEntries(drawsDescLocal.map((d, idx) => [d.issue, idx]));
+    const latestIssue = drawsDescLocal[0]?.issue || '';
+    const allCounts = [...map.values()].map(item => item.occurrence_count).sort((a,b)=>a-b);
+    const countP50 = percentile(allCounts, .5);
+    const countP80 = percentile(allCounts, .8);
+    return [...map.values()].map(item => {
+      const issuesDesc = [...item.issue_dates].sort((a,b)=>b.issue.localeCompare(a.issue, 'zh-CN'));
+      const issuesAsc = [...item.issue_dates].sort((a,b)=>a.issue.localeCompare(b.issue, 'zh-CN'));
+      const gaps = [];
+      for (let i = 1; i < issuesAsc.length; i++) gaps.push(Math.max(0, latestIndexMap[issuesAsc[i - 1].issue] - latestIndexMap[issuesAsc[i].issue] - 1));
+      const currentGap = issuesDesc.length ? latestIndexMap[issuesDesc[0].issue] : totalDraws;
+      const sortedGaps = [...gaps].sort((a,b)=>a-b);
+      const count = item.occurrence_count;
+      const rarityLabel = count <= Math.max(1, countP50) ? '偏低频' : (count >= countP80 ? '高频' : '常规');
+      const gapPositionLabel = currentGap >= (sortedGaps.length ? percentile(sortedGaps, .9) : currentGap) ? '高位遗漏' : (currentGap >= (sortedGaps.length ? percentile(sortedGaps, .5) : currentGap) ? '中位遗漏' : '低位遗漏');
+      return {
+        ...item,
+        total_draws: totalDraws,
+        occurrence_rate: item.occurrence_count / totalDraws,
+        first_seen_issue: issuesAsc[0]?.issue || '',
+        first_seen_date: issuesAsc[0]?.date || '',
+        last_seen_issue: issuesDesc[0]?.issue || '',
+        last_seen_date: issuesDesc[0]?.date || '',
+        current_gap: currentGap,
+        avg_gap: sortedGaps.length ? Number((sortedGaps.reduce((a,b) => a + b, 0) / sortedGaps.length).toFixed(1)) : totalDraws,
+        median_gap: sortedGaps.length ? percentile(sortedGaps, .5) : currentGap,
+        p80_gap: sortedGaps.length ? percentile(sortedGaps, .8) : currentGap,
+        p90_gap: sortedGaps.length ? percentile(sortedGaps, .9) : currentGap,
+        max_gap: sortedGaps.length ? Math.max(...sortedGaps) : currentGap,
+        gap_position_label: gapPositionLabel,
+        rarity_label: rarityLabel,
+        recent_records: issuesDesc.slice(0, 8),
+        latest_issue: latestIssue,
+      };
+    }).sort((a,b)=>a.type.localeCompare(b.type, 'zh-CN') || a.display.localeCompare(b.display, 'zh-CN'));
+  }
+  function buildMuseumFromStats(shapeStatsLocal) {
+    const regular = shapeStatsLocal.filter(s => s.kind === 'regular');
+    const special = shapeStatsLocal.filter(s => s.kind === 'special');
+    return {
+      rareShapes: [...regular].sort((a,b)=>a.occurrence_rate - b.occurrence_rate || b.current_gap - a.current_gap).slice(0, 36),
+      highGapShapes: [...shapeStatsLocal].sort((a,b)=>b.current_gap - a.current_gap || a.occurrence_rate - b.occurrence_rate).slice(0, 36),
+      oldestLastSeen: [...shapeStatsLocal].sort((a,b)=>a.last_seen_issue.localeCompare(b.last_seen_issue, 'zh-CN')).slice(0, 36),
+      specialArchive: [...special].sort((a,b)=>a.occurrence_rate - b.occurrence_rate || b.current_gap - a.current_gap).slice(0, 36),
+    };
+  }
+  function buildTypeMetaFromStats(shapeStatsLocal, baseTypeMeta) {
+    const out = {};
+    Object.keys(baseTypeMeta).forEach(type => {
+      const base = baseTypeMeta[type] || {};
+      out[type] = { group: base.group, label: base.label, defaultKind: base.defaultKind, description: base.description, itemCount: shapeStatsLocal.filter(s => s.type === type).length };
+    });
+    return out;
+  }
+  function buildSummaryFromDraws(drawsDescLocal, shapeStatsLocal) {
+    const latest = drawsDescLocal[0];
+    const oldest = drawsDescLocal[drawsDescLocal.length - 1];
+    return { totalDraws: drawsDescLocal.length, dateStart: oldest.date, dateEnd: latest.date, latestIssue: latest.issue, latestDate: latest.date, latestReds: latest.reds, latestBlue: latest.blue, latestSum: latest.metrics.sum, latestSpan: latest.metrics.span, latestAC: latest.metrics.ac, shapeStatCount: shapeStatsLocal.length, specialStatCount: shapeStatsLocal.filter(s => s.kind === 'special').length };
+  }
+  function buildDataPackageFromRaw(rawAsc, currentTypeMeta) {
+    const baseTypeMeta = {};
+    Object.keys(currentTypeMeta || {}).forEach(type => {
+      const meta = currentTypeMeta[type] || {};
+      baseTypeMeta[type] = { group: meta.group, label: meta.label, defaultKind: meta.defaultKind, description: meta.description };
+    });
+    const drawsDescLocal = buildDrawsDescFromRaw(rawAsc);
+    const shapeStatsLocal = buildShapeStatsFromDraws(drawsDescLocal, baseTypeMeta);
+    const museumLocal = buildMuseumFromStats(shapeStatsLocal);
+    const typeMetaLocal = buildTypeMetaFromStats(shapeStatsLocal, baseTypeMeta);
+    const summaryLocal = buildSummaryFromDraws(drawsDescLocal, shapeStatsLocal);
+    return { summary: summaryLocal, drawsDesc: drawsDescLocal, shapeStats: shapeStatsLocal, museum: museumLocal, typeMeta: typeMetaLocal };
+  }
+  async function encodeCompressedDataB64(obj) {
+    if (!('CompressionStream' in window)) throw new Error('当前浏览器不支持 CompressionStream。');
+    const bytes = new TextEncoder().encode(JSON.stringify(obj));
+    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+    const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < compressed.length; i += chunkSize) binary += String.fromCharCode(...compressed.subarray(i, i + chunkSize));
+    return btoa(binary);
+  }
+  function getCurrentFilename() {
+    const raw = String(location.pathname || '').split('/').pop() || 'ssq.html';
+    return decodeURIComponent(raw) || 'ssq.html';
+  }
+  async function persistUpdatedHtml(htmlText) {
+    if ('showSaveFilePicker' in window) {
+      try {
+        const handle = await window.showSaveFilePicker({ suggestedName: getCurrentFilename(), types: [{ description: 'HTML 文件', accept: { 'text/html': ['.html', '.htm'] } }] });
+        const writable = await handle.createWritable();
+        await writable.write(htmlText); await writable.close();
+        return 'saved';
+      } catch (err) {
+        if (err && err.name === 'AbortError') return 'cancelled';
+        throw err;
+      }
+    }
+    const blob = new Blob([htmlText], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = getCurrentFilename(); document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    return 'downloaded';
+  }
+  async function importCsvAndSync(file) {
+    setSyncBusy(true);
+    try {
+      syncLog(`开始读取 CSV：${file.name}`);
+      const buf = await file.arrayBuffer();
+      const text = decodeCsvBuffer(buf);
+      const csvRows = parseCsvRows(text);
+      syncLog(`CSV 解析完成：共 ${csvRows.length} 期。`);
+      const existingAsc = [...window.DATA.drawsDesc].reverse().map(d => ({ issue: d.issue, date: d.date, reds: [...d.reds].sort((a,b)=>a-b), blue: d.blue }));
+      const latestIssue = existingAsc[existingAsc.length - 1]?.issue || '';
+      syncLog(`当前页面数据：共 ${existingAsc.length} 期，最新 ${latestIssue || '无'}。`);
+      const incoming = csvRows.filter(row => row.issue.localeCompare(latestIssue, 'zh-CN') > 0);
+      if (!incoming.length) { syncLog('CSV 中没有比当前页面更新的期号，不需要同步。'); return; }
+      syncLog(`发现新增期数：${incoming.map(x => x.issue).join(', ')}`);
+      const mergedAsc = [...existingAsc, ...incoming].sort((a,b)=>a.issue.localeCompare(b.issue, 'zh-CN'));
+      syncLog(`开始重算数据包：新总期数 ${mergedAsc.length}。`);
+      const nextData = buildDataPackageFromRaw(mergedAsc, window.DATA.typeMeta);
+      syncLog('基础统计重建完成：summary / drawsDesc / shapeStats / museum / typeMeta 已更新。');
+      syncLog('保存后的新版 HTML 会继续使用当前这份页面代码里的评分、推荐与 3+2 逻辑。');
+      const b64 = await encodeCompressedDataB64(nextData);
+      const template = window.__HTML_TEMPLATE || document.documentElement.outerHTML;
+      const updatedHtml = template.replace(/const COMPRESSED_DATA_B64 = '([^']*)';/, `const COMPRESSED_DATA_B64 = '${b64}';`);
+      if (updatedHtml === template) throw new Error('未找到 COMPRESSED_DATA_B64 注入点。');
+      const persistMode = await persistUpdatedHtml(updatedHtml);
+      if (persistMode === 'saved') syncLog(`已保存到 ${getCurrentFilename()}。页面将切换到新数据视图。`);
+      else if (persistMode === 'downloaded') syncLog(`已下载更新后的 ${getCurrentFilename()}。页面将切换到新数据视图。`);
+      else syncLog('你取消了保存；当前页面仍会切换到新数据视图，但磁盘文件未覆盖。');
+      setTimeout(() => { document.open(); document.write(updatedHtml); document.close(); }, 120);
+    } catch (err) {
+      syncLog(`同步失败：${String(err && err.message ? err.message : err)}`);
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  renderAll();
+  ensureSyncUi();
+  copyHtmlTemplate();
+  window.analyzeCurrentNumbers = analyzeCurrentNumbers;
+  window.generateRecommendations = generateRecommendations;
 })();
+
+})();
+
 
 </script>
 
@@ -2541,372 +3291,5 @@ generateRecommendations = function() {
   else boot();
 })();
 </script>
-
-<script>
-(function(){
-  function applyFinalRecommendOverride() {
-    if (window.__SSQ_FINAL_RECOMMEND_OVERRIDE_APPLIED__) return;
-    window.__SSQ_FINAL_RECOMMEND_OVERRIDE_APPLIED__ = true;
-
-    const originalCandidateProfile = candidateProfile;
-    candidateProfile = function(reds, blue, opts = state.recommend.options) {
-      const p = originalCandidateProfile(reds, blue, opts);
-      p.scoreKey = `${p.scoreBand.min}-${p.scoreBand.max}`;
-      p.prevalenceKey = `${p.prevalenceBand.min}-${p.prevalenceBand.max}`;
-      p.balanceKey = `${p.balanceBand.min}-${p.balanceBand.max}`;
-      p.comboKey = `${p.scoreKey}|${p.prevalenceKey}|${p.balanceKey}`;
-      const recBase = Math.floor((p.recommendScore || 0) / 3) * 3;
-      const fitBase = Math.floor((p.bandFit || 0) / 5) * 5;
-      p.recommendBucket = `${recBase}-${Math.min(99, recBase + 2)}`;
-      p.fitBucket = `${fitBase}-${Math.min(100, fitBase + 4)}`;
-      return p;
-    };
-
-    function axisKeyForItem(axis, item) {
-      return axis === 'score' ? item.scoreKey : axis === 'prevalence' ? item.prevalenceKey : item.balanceKey;
-    }
-
-    function sortBandKeys(keys) {
-      return [...keys].sort((a, b) => {
-        const am = Number(String(a).split('-')[0] || 0);
-        const bm = Number(String(b).split('-')[0] || 0);
-        return am - bm || String(a).localeCompare(String(b), 'zh-CN');
-      });
-    }
-
-    function allocateAxisBandTargets(axis, total = 5) {
-      const system = bandSystemV6 && bandSystemV6[axis];
-      const topBands = system && system.sortedByRate ? system.sortedByRate.slice(0, 3) : [];
-      const picked = topBands.length ? topBands : (system && system.bands ? system.bands.slice(0, Math.min(3, system.bands.length)) : []);
-      if (!picked.length) return {};
-      const targets = {};
-      const baseCount = Math.min(total, picked.length);
-      for (let i = 0; i < baseCount; i++) {
-        const key = `${picked[i].min}-${picked[i].max}`;
-        targets[key] = 1;
-      }
-      let remaining = total - baseCount;
-      while (remaining > 0) {
-        let bestKey = null;
-        let bestScore = -Infinity;
-        for (const band of picked) {
-          const key = `${band.min}-${band.max}`;
-          const current = targets[key] || 0;
-          if (current >= 3) continue;
-          const score = (band.rate || 0) / (current + 0.85);
-          if (score > bestScore) {
-            bestScore = score;
-            bestKey = key;
-          }
-        }
-        if (!bestKey) break;
-        targets[bestKey] = (targets[bestKey] || 0) + 1;
-        remaining -= 1;
-      }
-      return targets;
-    }
-
-    function emptyTracker() {
-      return {
-        red: Object.create(null),
-        blue: Object.create(null),
-        score: Object.create(null),
-        prevalence: Object.create(null),
-        balance: Object.create(null),
-        combo: Object.create(null),
-        recommendBucket: Object.create(null),
-        fitBucket: Object.create(null),
-      };
-    }
-
-    function bump(map, key, delta = 1) {
-      map[key] = (map[key] || 0) + delta;
-    }
-
-    function addToTracker(tracker, item) {
-      item.reds.forEach(n => bump(tracker.red, n));
-      bump(tracker.blue, item.blue);
-      bump(tracker.score, item.scoreKey);
-      bump(tracker.prevalence, item.prevalenceKey);
-      bump(tracker.balance, item.balanceKey);
-      bump(tracker.combo, item.comboKey);
-      bump(tracker.recommendBucket, item.recommendBucket);
-      bump(tracker.fitBucket, item.fitBucket);
-    }
-
-    function getAxisNeed(axis, item, tracker, targets) {
-      const key = axisKeyForItem(axis, item);
-      return (targets[axis][key] || 0) - (tracker[axis][key] || 0);
-    }
-
-    function repeatPenaltyForReds(item, tracker) {
-      let penalty = 0;
-      for (const n of item.reds) {
-        const c = tracker.red[n] || 0;
-        if (c >= 2) return Number.POSITIVE_INFINITY;
-        if (c === 1) penalty += 36;
-      }
-      return penalty;
-    }
-
-    function overlapPenalty(item, selected) {
-      let penalty = 0;
-      for (const s of selected) {
-        const ov = countOverlap(s.reds, item.reds);
-        if (ov >= 5) return Number.POSITIVE_INFINITY;
-        if (ov === 4) penalty += 420;
-        else if (ov === 3) penalty += 170;
-        else if (ov === 2) penalty += 48;
-      }
-      return penalty;
-    }
-
-    function scoreItemForSet(item, selected, tracker, targets) {
-      const redPenalty = repeatPenaltyForReds(item, tracker);
-      if (!Number.isFinite(redPenalty)) return -Infinity;
-      const ovPenalty = overlapPenalty(item, selected);
-      if (!Number.isFinite(ovPenalty)) return -Infinity;
-
-      let scoreValue =
-        (item.recommendScore || 0) * 100 +
-        (item.bandFit || 0) * 9 +
-        (item.score || 0) * 4 +
-        (item.prevalence || 0) * 2 +
-        (item.balance || 0);
-
-      const scoreNeed = getAxisNeed('score', item, tracker, targets);
-      const prevalenceNeed = getAxisNeed('prevalence', item, tracker, targets);
-      const balanceNeed = getAxisNeed('balance', item, tracker, targets);
-
-      scoreValue += scoreNeed > 0 ? scoreNeed * 115 : scoreNeed * 80;
-      scoreValue += prevalenceNeed > 0 ? prevalenceNeed * 105 : prevalenceNeed * 72;
-      scoreValue += balanceNeed > 0 ? balanceNeed * 95 : balanceNeed * 66;
-
-      const comboCount = tracker.combo[item.comboKey] || 0;
-      const scoreBandCount = tracker.score[item.scoreKey] || 0;
-      const prevalenceBandCount = tracker.prevalence[item.prevalenceKey] || 0;
-      const balanceBandCount = tracker.balance[item.balanceKey] || 0;
-      const recBucketCount = tracker.recommendBucket[item.recommendBucket] || 0;
-      const fitBucketCount = tracker.fitBucket[item.fitBucket] || 0;
-      const blueCount = tracker.blue[item.blue] || 0;
-
-      if (comboCount >= 1) scoreValue -= 240 + comboCount * 70;
-      if (scoreBandCount >= 2) scoreValue -= 150 + scoreBandCount * 60;
-      if (prevalenceBandCount >= 2) scoreValue -= 120 + prevalenceBandCount * 48;
-      if (balanceBandCount >= 2) scoreValue -= 110 + balanceBandCount * 42;
-      if (recBucketCount >= 2) scoreValue -= 90 + recBucketCount * 34;
-      if (fitBucketCount >= 2) scoreValue -= 75 + fitBucketCount * 28;
-      if (blueCount >= 1) scoreValue -= 42 + blueCount * 30;
-
-      scoreValue -= redPenalty;
-      scoreValue -= ovPenalty;
-      return scoreValue;
-    }
-
-    function relaxedBackfillScore(item, selected, tracker) {
-      let scoreValue =
-        (item.recommendScore || 0) * 100 +
-        (item.bandFit || 0) * 8 +
-        (item.score || 0) * 3;
-
-      let redPenalty = 0;
-      for (const n of item.reds) {
-        const c = tracker.red[n] || 0;
-        if (c >= 3) return -Infinity;
-        redPenalty += c * 32;
-      }
-      scoreValue -= redPenalty;
-
-      for (const s of selected) {
-        const ov = countOverlap(s.reds, item.reds);
-        if (ov >= 5) return -Infinity;
-        if (ov === 4) scoreValue -= 260;
-        else if (ov === 3) scoreValue -= 120;
-        else if (ov === 2) scoreValue -= 30;
-      }
-
-      scoreValue -= (tracker.combo[item.comboKey] || 0) * 140;
-      scoreValue -= (tracker.score[item.scoreKey] || 0) * 52;
-      scoreValue -= (tracker.prevalence[item.prevalenceKey] || 0) * 42;
-      scoreValue -= (tracker.balance[item.balanceKey] || 0) * 38;
-      scoreValue -= (tracker.blue[item.blue] || 0) * 36;
-      return scoreValue;
-    }
-
-    function chooseRecommendationSet(ranked, total = 5) {
-      const shortlist = ranked.slice(0, Math.min(1200, ranked.length));
-      const targets = {
-        score: allocateAxisBandTargets('score', total),
-        prevalence: allocateAxisBandTargets('prevalence', total),
-        balance: allocateAxisBandTargets('balance', total),
-      };
-      const selected = [];
-      const tracker = emptyTracker();
-      const chosenKeys = new Set();
-
-      while (selected.length < total) {
-        let best = null;
-        let bestValue = -Infinity;
-        for (const item of shortlist) {
-          if (chosenKeys.has(item.key)) continue;
-          const value = scoreItemForSet(item, selected, tracker, targets);
-          if (value > bestValue) {
-            bestValue = value;
-            best = item;
-          }
-        }
-        if (!best) break;
-        selected.push(best);
-        chosenKeys.add(best.key);
-        addToTracker(tracker, best);
-      }
-
-      if (selected.length < total) {
-        const fallback = ranked
-          .filter(item => !chosenKeys.has(item.key))
-          .map(item => ({ item, value: relaxedBackfillScore(item, selected, tracker) }))
-          .filter(x => Number.isFinite(x.value))
-          .sort((a, b) => b.value - a.value)
-          .map(x => x.item);
-
-        for (const item of fallback) {
-          if (selected.length >= total) break;
-          if (chosenKeys.has(item.key)) continue;
-          selected.push(item);
-          chosenKeys.add(item.key);
-          addToTracker(tracker, item);
-        }
-      }
-
-      return { selected, targets, tracker };
-    }
-
-    function summarizeRecommendMeta(selected, targets, tracker, poolSize) {
-      const toSortedMap = map => {
-        const keys = sortBandKeys(Object.keys(map));
-        const out = {};
-        keys.forEach(k => { out[k] = map[k]; });
-        return out;
-      };
-      return {
-        poolSize,
-        targets: {
-          score: toSortedMap(targets.score),
-          prevalence: toSortedMap(targets.prevalence),
-          balance: toSortedMap(targets.balance),
-        },
-        actual: {
-          score: toSortedMap(tracker.score),
-          prevalence: toSortedMap(tracker.prevalence),
-          balance: toSortedMap(tracker.balance),
-        },
-        repeatedReds: Object.entries(tracker.red).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0])),
-        repeatedBlues: Object.entries(tracker.blue).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0])),
-        combos: Object.entries(tracker.combo).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN')).slice(0, 5),
-        uniqueRedCount: Object.keys(tracker.red).length,
-      };
-    }
-
-    function renderAxisTargetLine(title, actualMap, targetMap) {
-      const keys = sortBandKeys(new Set([...(Object.keys(targetMap || {})), ...(Object.keys(actualMap || {}))]));
-      if (!keys.length) return '';
-      const pills = keys.map(key => {
-        const actual = actualMap && actualMap[key] ? actualMap[key] : 0;
-        const target = targetMap && targetMap[key] ? targetMap[key] : 0;
-        const tone = actual > target ? 'yellow' : actual === target && actual > 0 ? 'green' : actual > 0 ? 'blue' : 'default';
-        return labelPill(`${key} 实际 ${actual} / 目标 ${target}`, tone);
-      }).join('');
-      return `<div style="margin-top:10px"><div class="helper">${escapeHtml(title)}</div><div class="pill-wrap" style="margin-top:8px">${pills}</div></div>`;
-    }
-
-    function renderRecommendMetaSummary(meta) {
-      if (!meta) return '';
-      const repeatedReds = meta.repeatedReds && meta.repeatedReds.length
-        ? meta.repeatedReds.map(([n, c]) => labelPill(`${String(n).padStart(2, '0')} × ${c}`, 'yellow')).join('')
-        : labelPill('红球无明显重复堆积', 'green');
-      const repeatedBlues = meta.repeatedBlues && meta.repeatedBlues.length
-        ? meta.repeatedBlues.map(([n, c]) => labelPill(`${String(n).padStart(2, '0')} × ${c}`, 'yellow')).join('')
-        : labelPill('蓝球无明显重复堆积', 'green');
-      const comboPills = meta.combos && meta.combos.length
-        ? meta.combos.map(([k, c]) => labelPill(`${k.replaceAll('|', ' / ')} × ${c}`, c > 1 ? 'yellow' : 'blue')).join('')
-        : labelPill('三轴带组合无重复', 'green');
-      return `
-        <div class="card" style="margin-bottom:14px">
-          <div class="section-head"><h3>推荐集分层校正</h3><div class="sub">这一版不再只在同一个高分簇里截 5 组，而是对综合评分带、常见度带、均衡度带做显式目标配额，并限制重复红球与重复带型。</div></div>
-          <div class="metric-grid">
-            <div class="metric"><div class="k">候选池规模</div><div class="v">${meta.poolSize}</div></div>
-            <div class="metric"><div class="k">5 组独立红球数</div><div class="v">${meta.uniqueRedCount}</div></div>
-            <div class="metric"><div class="k">重复红球</div><div class="v">${meta.repeatedReds ? meta.repeatedReds.length : 0}</div></div>
-            <div class="metric"><div class="k">重复蓝球</div><div class="v">${meta.repeatedBlues ? meta.repeatedBlues.length : 0}</div></div>
-          </div>
-          ${renderAxisTargetLine('综合评分带：实际 vs 目标', meta.actual.score, meta.targets.score)}
-          ${renderAxisTargetLine('历史常见度带：实际 vs 目标', meta.actual.prevalence, meta.targets.prevalence)}
-          ${renderAxisTargetLine('结构均衡度带：实际 vs 目标', meta.actual.balance, meta.targets.balance)}
-          <div style="margin-top:10px"><div class="helper">高频重复红球</div><div class="pill-wrap" style="margin-top:8px">${repeatedReds}</div></div>
-          <div style="margin-top:10px"><div class="helper">高频重复蓝球</div><div class="pill-wrap" style="margin-top:8px">${repeatedBlues}</div></div>
-          <div style="margin-top:10px"><div class="helper">三轴带组合</div><div class="pill-wrap" style="margin-top:8px">${comboPills}</div></div>
-        </div>
-      `;
-    }
-
-    generateRecommendations = function() {
-      state.recommend.options = readRecommendOptions();
-      const opts = state.recommend.options;
-      const pool = [];
-      const seen = new Set();
-      const attempts = opts.preferBalanced ? 18000 : 15000;
-
-      for (let i = 0; i < attempts; i++) {
-        const cand = randomCandidate();
-        const profile = candidateProfile(cand.reds, cand.blue, opts);
-        if (profile.ruleHits.length) continue;
-        if (seen.has(profile.key)) continue;
-        seen.add(profile.key);
-        pool.push(profile);
-      }
-
-      const ranked = pool.sort((a, b) =>
-        (b.recommendScore || 0) - (a.recommendScore || 0) ||
-        (b.bandFit || 0) - (a.bandFit || 0) ||
-        (b.score || 0) - (a.score || 0) ||
-        (b.prevalence || 0) - (a.prevalence || 0) ||
-        (b.balance || 0) - (a.balance || 0) ||
-        a.key.localeCompare(b.key, 'zh-CN')
-      );
-
-      const chosen = chooseRecommendationSet(ranked, 5);
-      state.recommend.meta = summarizeRecommendMeta(chosen.selected, chosen.targets, chosen.tracker, pool.length);
-      state.recommend.lastList = sortRecommendList(chosen.selected, state.recommend.sort || 'recommend_desc');
-      renderTabContent();
-    };
-
-    renderRecommendResult = function() {
-      if (!state.recommend.lastList.length) {
-        return '<div class="empty">点击“推荐 5 组”后，这里显示结果。当前版本会显式校正三条评分轴的评分带分布，并限制高频重复红球。</div>';
-      }
-      const list = sortRecommendList(state.recommend.lastList, state.recommend.sort || 'recommend_desc');
-      return `${renderRecommendMetaSummary(state.recommend.meta)}<div class="accordion-list">${list.map((item, idx) => renderRecommendationAccordion(item, idx)).join('')}</div>`;
-    };
-
-    state.recommend.sort = state.recommend.sort || 'recommend_desc';
-    if (state.tab === 'recommend') renderTabContent();
-  }
-
-  function waitForAppReady() {
-    if (typeof state !== 'undefined' &&
-        typeof candidateProfile === 'function' &&
-        typeof randomCandidate === 'function' &&
-        typeof bandSystemV6 !== 'undefined' &&
-        typeof renderTabContent === 'function') {
-      applyFinalRecommendOverride();
-      return;
-    }
-    setTimeout(waitForAppReady, 60);
-  }
-
-  waitForAppReady();
-})();
-</script>
-
 </body>
 </html>
