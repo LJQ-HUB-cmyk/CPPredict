@@ -12,9 +12,11 @@
 
 ## 3、怎么运行
 -先安装依赖
+
 pip install -r requirements.txt
 
 -然后增量更新数据
+
 python src\ssq_crawler.py inc
 
 -再打开src\ssq.html，点击“同步数据”，选取那个csv
